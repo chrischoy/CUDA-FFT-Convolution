@@ -1,0 +1,16 @@
+To compile and run this software, one needs the NVIDIA CUDA Toolkit (http://www.nvidia.com/object/cuda_get.html) and, of course, an NVIDIA graphics card of reasonably modern vintage.
+
+BUILDING INSTRUCTIONS: First edit the 'MATLAB' (and if necessary, 'MEX') variables in the Makefile, then
+simply run 'make' at a prompt and an appropriate (mex/mexmac/mexmaci/dll?) file will be created.
+
+I make to claim to have written this code.. it is simply adapted from an example included in the CUDA SDK
+and wrapped in MATLAB-compatible C code.  Furthermore, I have no interest in compiling or testing this
+code in Windows, so no guarantees about cross-platform compatibility or ease of build.
+
+With very large data matrices, it can completely crash your computer, so beware.  In testing, I found an upper
+limit on convolution size (limited either by the size the CUDA FFT function can accept or the size of a 2D
+texture) of roughly 2^20 elements, so above that the code breaks the convolution into many smaller pieces.
+If you are feeling Adventurous, feel free to raise that limit, but be aware that at those sizes cudaconv is 
+roughly 50-100x faster than conv2.
+
+By Alexander Huth, California Institute of Technology, 2008

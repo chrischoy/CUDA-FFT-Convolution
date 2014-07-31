@@ -6,25 +6,16 @@
  * Copyright 2012 The MathWorks, Inc.
  */
 
+
+#include <cuda.h>
+#include <cufft.h>
+#include "cutil.h"
 #include "mex.h"
 #include "gpu/mxGPUArray.h"
+// #include "convolutionFFTkernel.cu"
 
 typedef float2 Complex;
 static bool debug = true;
-
-/*
- * Device code
- */
-void __global__ TimesTwo(double const * const A,
-                         double * const B,
-                         int const N)
-{
-    /* Calculate the global linear index, assuming a 1-d grid. */
-    int const i = blockDim.x * blockIdx.x + threadIdx.x;
-    if (i < N) {
-        B[i] = 2.0 * A[i];
-    }
-}
 
 /*
  * Host code
@@ -87,25 +78,28 @@ void mexFunction(int nlhs, mxArray *plhs[],
     mxGPUArray *FFT_DATA;
     float2 *d_CFFT_DATA;
     float *h_Data;
-    int N;
+    float *d_Data;
     char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
     char const * const errMsg = "Invalid input to MEX file.";
 
     /* Choose a reasonably sized number of threads for the block. */
-    int const threadsPerBlock = 32;
-    int MblocksPerGrid, NblocksPerGrid;
-    int KERNEL_H, KERNEL_W, DATA_H, DATA_W, PADDING_H, PADDING_W, FF_H, FFT_W;
+    // int const THREAD_PER_BLOCK_X = 16;
+    // int const THREAD_PER_BLOCK_Y = 8;
+    // int const THREAD_PER_BLOCK_Z = 32;
+    // int MblocksPerGrid, NblocksPerGrid;
+    int KERNEL_H, KERNEL_W, DATA_H, DATA_W, PADDING_H, PADDING_W, FFT_H, FFT_W, FEATURE_DIM;
+    int DATA_SIZE, FFT_SIZE, CFFT_SIZE;
 
-    cufftHandle FFTplan_R2C;
-    cufftHandle FFTplan_C2R;
-
+    
     /* Initialize the MathWorks GPU API. */
     mxInitGPU();
 
+    
     /* Throw an error if the input is not a GPU array. */
-    if ((nrhs!=3) || (mxIsGPUArray(mxDATA)) || mxGetNumberOfDimensions(mxDATA) != 3) {
+    if ((nrhs!=3) || (mxIsGPUArray(mxDATA)) || mxGetNumberOfDimensions(mxDATA) != 3 || mxGetClassID(mxDATA) != mxSINGLE_CLASS) {
         mexErrMsgIdAndTxt(errId, errMsg);
     }
+
 
     // Kernel dimensions
     KERNEL_H = (int)mxGetScalar(prhs[1]);
@@ -142,37 +136,62 @@ void mexFunction(int nlhs, mxArray *plhs[],
     FFT_dims[0] = FFT_H;
     FFT_dims[1] = FFT_W;
     FFT_dims[2] = FEATURE_DIM;
-    
+
     /* Wrap the result up as a MATLAB gpuArray for return. */
-    plhs[0] = mxGPUCreateGPUArray(3,
+    FFT_DATA = mxGPUCreateGPUArray(3,
                                 FFT_dims,
                                 mxSINGLE_CLASS,
                                 mxCOMPLEX,
                                 MX_GPU_INITIALIZE_VALUES);
     
-    d_CFFT_DATA = (Complex *)mxGPUGetData(plhr[0]);
+    d_CFFT_DATA = (Complex *)mxGPUGetData(FFT_DATA);
     
-    cudaMalloc((void **)&d_Data,            DATA_SIZE);
-    cudaMalloc((void **)&d_PaddedData,      FFT_SIZE) ;
-    cudaMalloc((void **)&fft_PaddedData,    CFFT_SIZE);
+    cudaMalloc((void **)&d_Data,        DATA_SIZE);
+    // cudaMalloc((void **)&d_PaddedData,  FFT_SIZE);
+    // cudaMalloc((void **)&d_CFFT_DATA,   CFFT_SIZE);
 
-    cufftPlan2d(&FFTplan_R2C, FFT_H, FFT_W, CUFFT_R2C) ;
+    // cudaMemset(d_PaddedData,   0, FFT_SIZE);
+    // cufftPlan2d(&FFTplan_R2C, FFT_H, FFT_W, CUFFT_R2C);
 
-    /*
-     * Call the kernel using the CUDA runtime API. We are using a 1-d grid here,
-     * and it would be possible for the number of elements to be too large for
-     * the grid. For this example we are not guarding against this possibility.
-     */
-    N = (int)(mxGPUGetNumberOfElements(A));
-    blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
-    TimesTwo<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, N);
+    int BATCH = FEATURE_DIM;
+    
+    int RANK = 2;
+    
+    int FFT_Dims[2];
+    FFT_Dims[0] = FFT_H;
+    FFT_Dims[1] = FFT_W;
+    
+    int inembed [2];
+    inembed[0] = DATA_H;
+    inembed[1] = DATA_W;
 
-    plhs[0] = mxGPUCreateMxArrayOnGPU(B);
+    int istrid = 1;
+    int idist = DATA_W * DATA_H;
+
+    int onembed [2];
+    inembed[0] = FFT_H;
+    inembed[1] = FFT_W;
+
+    int ostrid = 1;
+    int odist = FFT_W * FFT_H;
+    
+    cufftHandle FFTplan_R2C;
+    CUFFT_SAFE_CALL(cufftPlanMany(&FFTplan_R2C, RANK, FFT_Dims, inembed, istrid, idist, onembed, ostrid, odist, CUFFT_R2C, BATCH));
+
+    cudaMemcpy(d_Data, h_Data, DATA_SIZE, cudaMemcpyHostToDevice);
+
+    CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, (cufftReal *)d_Data, (cufftComplex *)d_CFFT_DATA));
+    cudaDeviceSynchronize();
+
+    plhs[0] = mxGPUCreateMxArrayOnGPU(FFT_DATA);
+
+    cufftDestroy(FFTplan_R2C);
 
     /*
      * The mxGPUArray pointers are host-side structures that refer to device
      * data. These must be destroyed before leaving the MEX function.
      */
-    mxGPUDestroyGPUArray(A);
-    mxGPUDestroyGPUArray(B);
+    mxGPUDestroyGPUArray(FFT_DATA);
+    cudaFree(d_Data);
+    // mxGPUDestroyGPUArray(d_CFFT_DATA);
 }
