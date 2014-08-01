@@ -14,8 +14,35 @@
 #include "gpu/mxGPUArray.h"
 // #include "convolutionFFTkernel.cu"
 
+#define IMUL(a, b) __mul24(a, b)
+
+
 typedef float2 Complex;
 static bool debug = true;
+
+/*
+ * Device Code
+ */
+__global__ void padData(
+    float *d_PaddedData,
+    float *d_Data,
+    int fftW,
+    int fftH,
+    int dataW,
+    int dataH,
+    int FEATURE_DIM
+){
+    const int x = IMUL(blockDim.x, blockIdx.x) + threadIdx.x;
+    const int y = IMUL(blockDim.y, blockIdx.y) + threadIdx.y;
+    const int z = IMUL(blockDim.z, blockIdx.z) + threadIdx.z;
+
+    if(x < fftW && y < fftH && z < FEATURE_DIM){
+        if(x < dataW && y < dataH)
+            d_PaddedData[IMUL(z, IMUL(fftW, fftH)) + IMUL(y, fftW) + x] = d_Data[ IMUL(z, IMUL(dataH, dataW)) + IMUL(y, dataH ) + x];
+        else
+            d_PaddedData[IMUL(z, IMUL(fftW, fftH)) + IMUL(y, fftW) + x] = 0;
+    }
+}
 
 /*
  * Host code
@@ -79,13 +106,15 @@ void mexFunction(int nlhs, mxArray *plhs[],
     float2 *d_CFFT_DATA;
     float *h_Data;
     float *d_Data;
+    float *d_PaddedData;
     char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
     char const * const errMsg = "Invalid input to MEX file.";
 
     /* Choose a reasonably sized number of threads for the block. */
-    // int const THREAD_PER_BLOCK_X = 16;
-    // int const THREAD_PER_BLOCK_Y = 8;
-    // int const THREAD_PER_BLOCK_Z = 32;
+    int const THREAD_PER_BLOCK_H = 16;
+    int const THREAD_PER_BLOCK_W = 8;
+    int const THREAD_PER_BLOCK_D = 8;
+
     // int MblocksPerGrid, NblocksPerGrid;
     int KERNEL_H, KERNEL_W, DATA_H, DATA_W, PADDING_H, PADDING_W, FFT_H, FFT_W, FEATURE_DIM;
     int DATA_SIZE, FFT_SIZE, CFFT_SIZE;
@@ -111,7 +140,13 @@ void mexFunction(int nlhs, mxArray *plhs[],
     DATA_H = DATA_dims[0];
     DATA_W = DATA_dims[1];
     FEATURE_DIM = DATA_dims[2];
-    if(debug) fprintf(stderr,"Data size: h=%d, w=%d\n",DATA_H,DATA_W);
+
+    h_Data = (float *)mxGetData(mxDATA);
+    if(debug){
+        for(int i = 0; i < DATA_H * DATA_W * FEATURE_DIM; i++)
+            fprintf(stderr,"%f\n",h_Data[i]);
+        fprintf(stderr,"Data size: h=%d, w=%d, f=%d\n",DATA_H,DATA_W,FEATURE_DIM);
+    } 
 
     // Width and height of padding
     PADDING_H = KERNEL_H - 1;
@@ -129,8 +164,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     // Allocate memory for input
     // No need to initialize using mxCalloc
-    h_Data = (float *)mxGetData(mxDATA);
-
+    
     mwSize *FFT_dims = (mwSize *)mxMalloc(3 * sizeof(mwSize));
 
     FFT_dims[0] = FFT_H;
@@ -147,8 +181,23 @@ void mexFunction(int nlhs, mxArray *plhs[],
     d_CFFT_DATA = (Complex *)mxGPUGetData(FFT_DATA);
     
     cudaMalloc((void **)&d_Data,        DATA_SIZE);
-    // cudaMalloc((void **)&d_PaddedData,  FFT_SIZE);
+    cudaMalloc((void **)&d_PaddedData,  FFT_SIZE);
     // cudaMalloc((void **)&d_CFFT_DATA,   CFFT_SIZE);
+    cudaMemcpy(d_Data, h_Data, DATA_SIZE, cudaMemcpyHostToDevice);
+
+
+    dim3 threadBlock(THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D);
+    dim3 dataBlockGrid(iDivUp(FFT_W, threadBlock.x), iDivUp(FFT_H, threadBlock.y), iDivUp(FEATURE_DIM, threadBlock.z));
+
+    padData<<<dataBlockGrid, threadBlock>>>(
+        d_PaddedData,
+        d_Data,
+        FFT_W,
+        FFT_H,
+        DATA_W,
+        DATA_H,
+        FEATURE_DIM
+        );
 
     // cudaMemset(d_PaddedData,   0, FFT_SIZE);
     // cufftPlan2d(&FFTplan_R2C, FFT_H, FFT_W, CUFFT_R2C);
@@ -157,30 +206,28 @@ void mexFunction(int nlhs, mxArray *plhs[],
     
     int RANK = 2;
     
-    int FFT_Dims[2];
-    FFT_Dims[0] = FFT_H;
-    FFT_Dims[1] = FFT_W;
+    int FFT_Dims[] = { FFT_W, FFT_H };
     
-    int inembed [2];
-    inembed[0] = DATA_H;
-    inembed[1] = DATA_W;
+    int inembed[] = { FFT_W, FFT_H};
+    int onembed[] = { FFT_W , FFT_H};
 
     int istrid = 1;
-    int idist = DATA_W * DATA_H;
-
-    int onembed [2];
-    inembed[0] = FFT_H;
-    inembed[1] = FFT_W;
-
     int ostrid = 1;
-    int odist = FFT_W * FFT_H;
+
+    int idist = FFT_H * FFT_W;
+    int odist = FFT_H * FFT_W;
     
     cufftHandle FFTplan_R2C;
-    CUFFT_SAFE_CALL(cufftPlanMany(&FFTplan_R2C, RANK, FFT_Dims, inembed, istrid, idist, onembed, ostrid, odist, CUFFT_R2C, BATCH));
+    CUFFT_SAFE_CALL(cufftPlanMany(&FFTplan_R2C, 
+        RANK, 
+        FFT_Dims, 
+        inembed, istrid, idist, // *inembed, istride, idist
+        onembed, ostrid, odist, 
+        CUFFT_R2C, 
+        BATCH));
 
-    cudaMemcpy(d_Data, h_Data, DATA_SIZE, cudaMemcpyHostToDevice);
 
-    CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, (cufftReal *)d_Data, (cufftComplex *)d_CFFT_DATA));
+    CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedData, d_CFFT_DATA));
     cudaDeviceSynchronize();
 
     plhs[0] = mxGPUCreateMxArrayOnGPU(FFT_DATA);
