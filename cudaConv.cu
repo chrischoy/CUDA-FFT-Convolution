@@ -5,7 +5,7 @@
 #include "gpu/mxGPUArray.h"
 
 #define IMUL(a, b) __mul24(a, b)
-static bool debug = false;
+static bool debug = true;
 
 /*
  * Device Code
@@ -89,11 +89,14 @@ void mexFunction(int nlhs, mxArray *plhs[],
                  int nrhs, mxArray const *prhs[])
 {
     /* Declare all variables.*/
-    const mxArray *mxDATA = prhs[0];
-    mxGPUArray *FFT_DATA;
+    const mxArray *mxFFTData = prhs[0];
+    const mxArray *mxKernel = prhs[1];
+    mxGPUArray *mxFFTKernel;
     float2 *d_CFFT_DATA;
-    float *h_Data;
-    float *d_Data;
+    float2 *d_CFFT_KERNEL;
+
+    float *h_Kernel;
+    float *d_Kernel;
     char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
     char const * const errMsg = "Invalid input to MEX file.";
 
@@ -113,61 +116,56 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     
     /* Throw an error if the input is not a GPU array. */
-    if ((nrhs!=3) ||
-            mxIsGPUArray(mxDATA) || 
-            mxGetNumberOfDimensions(mxDATA) != 3 || 
-            mxGetClassID(mxDATA) != mxSINGLE_CLASS) {
+    if ((nrhs!=2) ||
+            !mxIsGPUArray(mxFFTData) || 
+            mxGetNumberOfDimensions(mxFFTData) != 3 || 
+            mxGetClassID(mxFFTData) != mxSINGLE_CLASS ||
+            mxGetClassID(mxKernel) != mxSINGLE_CLASS) {
         mexErrMsgIdAndTxt(errId, errMsg);
     }
 
+    // FFT Dim
+    mwSize const * mxFFT_Dim = mxGPUGetDimensions(mxFFTData);
+    FFT_H = mxFFT_Dim[0];
+    FFT_W = mxFFT_Dim[1];
+    FEATURE_DIM = mxFFT_Dim[2];
+    if(debug) fprintf(stderr,"FFT Data size: h=%d, w=%d\n", FFT_H, FFT_W);
 
     // Kernel dimensions
-    KERNEL_H = (int)mxGetScalar(prhs[1]);
-    KERNEL_W = (int)mxGetScalar(prhs[2]);
-    if(debug) fprintf(stderr,"Kernel size: h=%d, w=%d\n",KERNEL_H,KERNEL_W);
+    const mwSize * Kernel_Dim = mxGetDimensions(mxKernel);
+    KERNEL_H = Kernel_Dim[0];
+    KERNEL_W = Kernel_Dim[1];
 
-    // Data dimensions
-    const mwSize *DATA_dims = mxGetDimensions(mxDATA);
-    DATA_H = DATA_dims[0];
-    DATA_W = DATA_dims[1];
-    FEATURE_DIM = DATA_dims[2];
+    if (FEATURE_DIM != Kernel_Dim[2] || KERNEL_W > FFT_W || KERNEL_H > FFT_H ){
+        mexErrMsgIdAndTxt(errId, errMsg);
+    }
 
-    h_Data = (float *)mxGetData(mxDATA);
-    if(debug) fprintf(stderr,"Data size: h=%d, w=%d, f=%d\n",DATA_H,DATA_W,FEATURE_DIM); 
+    if(debug) fprintf(stderr,"Kernel size: h=%d, w=%d\n", KERNEL_H, KERNEL_W);
 
-    // Width and height of padding
-    PADDING_H = KERNEL_H - 1;
-    PADDING_W = KERNEL_W - 1;
-
-    // Derive FFT size from data and kernel dimensions
-    FFT_H = computeFFTsize(DATA_H + PADDING_H);
-    FFT_W = computeFFTsize(DATA_W + PADDING_W);
-    if(debug) fprintf(stderr,"FFT size: h=%d, w=%d\n",FFT_H,FFT_W);
-
-    DATA_SIZE = DATA_W * DATA_H * FEATURE_DIM * sizeof(float);
+    KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
     FFT_SIZE  = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float);
     CFFT_SIZE = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float2);
 
-    // Allocate memory for input
-    // No need to initialize using mxCalloc
-    
-    mwSize *FFT_dims = (mwSize *)mxMalloc(3 * sizeof(mwSize));
+    // Get Complex FFT data handle
+    d_CFFT_DATA = (float2 *)mxGPUGetData(mxFFTData);
 
-    FFT_dims[0] = FFT_H;
-    FFT_dims[1] = FFT_W;
-    FFT_dims[2] = FEATURE_DIM;
+    // Get Kernel Data
+    if (!mxIsGPUArray(mxKernel)){
+        h_Kernel = (float *)mxGetData(mxKernel);
+        cudaMalloc((void **)&d_Kernel, KERNEL_SIZE);
+        cudaMemcpy(d_Kernel, h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice);
+    }else{
+        d_Kernel = (float *)mxGPUGetData(mxKernel);
+    }
 
-    /* Wrap the result up as a MATLAB gpuArray for return. */
-    FFT_DATA = mxGPUCreateGPUArray(3,
-                                FFT_dims,
-                                mxSINGLE_CLASS,
-                                mxCOMPLEX,
-                                MX_GPU_INITIALIZE_VALUES);
-    
-    d_CFFT_DATA = (float2 *)mxGPUGetData(FFT_DATA);
-    
-    cudaMalloc((void **)&d_Data,        DATA_SIZE);
-    cudaMemcpy(d_Data, h_Data, DATA_SIZE, cudaMemcpyHostToDevice);
+    /*  Pad Kernel */
+    /* Create a GPUArray to hold the result and get its underlying pointer. */
+    mxFFTKernel = mxGPUCreateGPUArray(3,
+                            mxFFT_Dim,
+                            mxSINGLE_CLASS,
+                            mxCOMPLEX,
+                            MX_GPU_DO_NOT_INITIALIZE);
+    d_CFFT_KERNEL = (double *)(mxGPUGetData(mxFFTKernel));
 
     dim3 threadBlock(THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D);
     dim3 dataBlockGrid( iDivUp(FFT_W, threadBlock.x), 
@@ -175,42 +173,36 @@ void mexFunction(int nlhs, mxArray *plhs[],
                         iDivUp(FEATURE_DIM, threadBlock.z));
 
     padData<<<dataBlockGrid, threadBlock>>>(
-        (float *)d_CFFT_DATA,
-        d_Data,
+        (float *)d_CFFT_KERNEL,
+        d_Kernel,
         FFT_W,
         FFT_H,
-        DATA_W,
-        DATA_H,
+        KERNEL_W,
+        KERNEL_H,
         FEATURE_DIM
         );
 
     int FFT_Dims[] = { FFT_W, FFT_H };
-
-    int idist = FFT_H * FFT_W;
-    int odist = FFT_H * FFT_W;
+    int dist = FFT_H * FFT_W;
     
     cufftHandle FFTplan_R2C;
     CUFFT_SAFE_CALL(cufftPlanMany(&FFTplan_R2C, 
         2, // rank
         FFT_Dims, 
-        FFT_Dims, 1, idist, // *inembed, istride, idist
-        FFT_Dims, 1, odist, // *onembed, ostride, odist
+        FFT_Dims, 1, dist, // *inembed, istride, idist
+        FFT_Dims, 1, dist, // *onembed, ostride, odist
         CUFFT_R2C, 
         FEATURE_DIM)); // batch
 
-
-    CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, (float *)d_CFFT_DATA, d_CFFT_DATA));
+    CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, (float *)d_CFFT_KERNEL, d_CFFT_KERNEL));
     CUFFT_SAFE_CALL(cudaDeviceSynchronize());
 
-    plhs[0] = mxGPUCreateMxArrayOnGPU(FFT_DATA);
+    plhs[0] = mxGPUCreateMxArrayOnGPU(mxFFTKernel);
 
     /*
      * The mxGPUArray pointers are host-side structures that refer to device
      * data. These must be destroyed before leaving the MEX function.
      */
-    mxGPUDestroyGPUArray(FFT_DATA);
+    mxGPUDestroyGPUArray(mxFFTKernel);
     cufftDestroy(FFTplan_R2C);
-    cudaFree(d_Data);
-    mxFree(FFT_dims);
-    // mxGPUDestroyGPUArray(d_CFFT_DATA);
 }

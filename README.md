@@ -15,7 +15,7 @@ IN : host float
 OUT : device complex float
         k-dim close multiple of 16 ( m + max p ) close multiple of 16 ( n + max q )
 
-cudaFFTKernelProductIFFT.cu
+cudaConv.cu
  
 IN : device float
         k-dim close multiple of 16 ( m + max p ) close multiple of 16 ( n + max q )
@@ -25,4 +25,7 @@ IN : device float
 
 OUT : device float
         close multiple of 16 ( m + max p ) close multiple of 16 ( n + max q )
+
+      [device float
+        kernel in GPU.]
 
