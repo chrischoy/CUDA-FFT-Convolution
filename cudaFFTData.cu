@@ -5,7 +5,7 @@
 #include "gpu/mxGPUArray.h"
 
 #define IMUL(a, b) __mul24(a, b)
-static bool debug = false;
+static bool debug = true;
 
 /*
  * Device Code
@@ -94,6 +94,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     float2 *d_CFFT_DATA;
     float *h_Data;
     float *d_Data;
+    float *d_PaddedData;
     char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
     char const * const errMsg = "Invalid input to MEX file.";
 
@@ -153,7 +154,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     
     mwSize *FFT_dims = (mwSize *)mxMalloc(3 * sizeof(mwSize));
 
-    FFT_dims[0] = FFT_H;
+    FFT_dims[0] = FFT_H/2 + 1;
     FFT_dims[1] = FFT_W;
     FFT_dims[2] = FEATURE_DIM;
 
@@ -167,6 +168,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
     d_CFFT_DATA = (float2 *)mxGPUGetData(FFT_DATA);
     
     cudaMalloc((void **)&d_Data,        DATA_SIZE);
+    cudaMalloc((void **)&d_PaddedData,  FFT_SIZE);
+
     cudaMemcpy(d_Data, h_Data, DATA_SIZE, cudaMemcpyHostToDevice);
 
     dim3 threadBlock(THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D);
@@ -175,7 +178,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
                         iDivUp(FEATURE_DIM, threadBlock.z));
 
     padData<<<dataBlockGrid, threadBlock>>>(
-        (float *)d_CFFT_DATA,
+        d_PaddedData,
         d_Data,
         FFT_W,
         FFT_H,
@@ -184,26 +187,32 @@ void mexFunction(int nlhs, mxArray *plhs[],
         FEATURE_DIM
         );
 
+    if(debug) fprintf(stderr,"Padding\n");
+
     int FFT_Dims[] = { FFT_W, FFT_H };
 
-    int idist = FFT_H * FFT_W;
-    int odist = FFT_H * FFT_W;
+    int idist = FFT_W * FFT_H;
+    int odist = FFT_W * (FFT_H/2 + 1);
     
+    int inembed[] = {FFT_W, FFT_H};
+    int onembed[] = {FFT_W, FFT_H/2 + 1};
+
     cufftHandle FFTplan_R2C;
     CUFFT_SAFE_CALL(cufftPlanMany(&FFTplan_R2C, 
         2, // rank
         FFT_Dims, 
-        FFT_Dims, 1, idist, // *inembed, istride, idist
-        FFT_Dims, 1, odist, // *onembed, ostride, odist
+        inembed, 1, idist, // *inembed, istride, idist
+        onembed, 1, odist, // *onembed, ostride, odist
         CUFFT_R2C, 
         FEATURE_DIM)); // batch
 
 
-    CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, (float *)d_CFFT_DATA, d_CFFT_DATA));
+    CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedData, d_CFFT_DATA));
     CUFFT_SAFE_CALL(cudaDeviceSynchronize());
+    if(debug) fprintf(stderr,"Sync\n");
 
     plhs[0] = mxGPUCreateMxArrayOnGPU(FFT_DATA);
-
+    if(debug) fprintf(stderr,"plhs\n");
     /*
      * The mxGPUArray pointers are host-side structures that refer to device
      * data. These must be destroyed before leaving the MEX function.
@@ -211,6 +220,6 @@ void mexFunction(int nlhs, mxArray *plhs[],
     mxGPUDestroyGPUArray(FFT_DATA);
     cufftDestroy(FFTplan_R2C);
     cudaFree(d_Data);
+    cudaFree(d_PaddedData);
     mxFree(FFT_dims);
-    // mxGPUDestroyGPUArray(d_CFFT_DATA);
 }
