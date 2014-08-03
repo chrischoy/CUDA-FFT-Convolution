@@ -156,12 +156,12 @@ void mexFunction(int nlhs, mxArray *plhs[],
     const mxGPUArray *mxKernel;
     mxGPUArray *mxFFTKernel;
     mxGPUArray *mxConvolution;
-    mxGPUArray *mxEProd;
 
     float2 *d_CFFT_DATA;
     float2 *d_CFFT_KERNEL;
-    float2 *d_EProd;
+
     float *d_CONVOLUTION;
+    float *d_IFFTEProd;
 
     float *h_Kernel;
     float *d_Kernel;
@@ -179,9 +179,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
     const mwSize * mxKernel_Dim;
     const mwSize * mxFFT_Dim;
     // int MblocksPerGrid, NblocksPerGrid;
-    int KERNEL_H, KERNEL_W, DATA_H, DATA_W, PADDING_H, PADDING_W, 
+    int KERNEL_H, KERNEL_W,
         CFFT_H, CFFT_W, FFT_H, FFT_W, FEATURE_DIM,
-        DATA_SIZE, KERNEL_SIZE, FFT_SIZE, CFFT_SIZE;
+        KERNEL_SIZE, FFT_SIZE;
 
     
     /* Initialize the MathWorks GPU API. */
@@ -209,7 +209,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     FEATURE_DIM = mxFFT_Dim[2];
 
     FFT_SIZE  = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float);
-    CFFT_SIZE = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float2);
+    // CFFT_SIZE = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float2);
 
     if(debug) fprintf(stderr,"FFT Data size: h=%d, w=%d, f=%d\n", FFT_H, FFT_W, FEATURE_DIM);
 
@@ -246,7 +246,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     /*  Pad Kernel */
-    cudaMalloc((void **)&d_PaddedKernel,  FFT_SIZE);
+    cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE);
+    cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE);
 
     dim3 threadBlock3D(THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D);
     dim3 dataBlockGrid3D( iDivUp(FFT_W, threadBlock3D.x), 
@@ -276,16 +277,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     /* Create a GPUArray to hold the result and get its underlying pointer. */
-    /* TODO : replace it with simple cuda variable after debugging */
     d_CFFT_DATA = (float2 *)mxGPUGetDataReadOnly(mxFFTData);
-
-    mxFFTKernel = mxGPUCreateGPUArray(3,
-                            mxFFT_Dim,
-                            mxSINGLE_CLASS,
-                            mxCOMPLEX,
-                            MX_GPU_DO_NOT_INITIALIZE);
-
-    d_CFFT_KERNEL = (cufftComplex *)(mxGPUGetData(mxFFTKernel));
 
     mxConvolution = mxGPUCreateGPUArray(2,
                             FFT_dims, // Third element will not be accessed
@@ -295,22 +287,13 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     d_CONVOLUTION = (cufftReal *)(mxGPUGetData(mxConvolution));
 
-    mxEProd = mxGPUCreateGPUArray(3,
-                            mxFFT_Dim, // Third element will not be accessed
+    mxFFTKernel = mxGPUCreateGPUArray(3,
+                            mxFFT_Dim,
                             mxSINGLE_CLASS,
                             mxCOMPLEX,
-                            MX_GPU_INITIALIZE_VALUES);
+                            MX_GPU_DO_NOT_INITIALIZE);
 
-    d_EProd = (cufftComplex *)(mxGPUGetData(mxEProd));
-
-    mxGPUArray *mxIFFTEProd = mxGPUCreateGPUArray(3,
-                            FFT_dims, // Third element will not be accessed
-                            mxSINGLE_CLASS,
-                            mxREAL,
-                            MX_GPU_INITIALIZE_VALUES);
-
-    float *d_IFFTEProd = (cufftReal *)(mxGPUGetData(mxIFFTEProd));
-
+    d_CFFT_KERNEL = (cufftComplex *)(mxGPUGetData(mxFFTKernel));
 
     int BATCH = FEATURE_DIM;
     int FFT_Dims[] = { FFT_W, FFT_H };
@@ -353,16 +336,16 @@ void mexFunction(int nlhs, mxArray *plhs[],
     /* Element-wise multiplication in frequency domain */
     /* If execute the following, second compile of this file create MATLAB error */
     elementwiseProductAndNormalize<<<dataBlockGrid3D, threadBlock3D>>>(
-            d_EProd,
-            d_CFFT_KERNEL,
-            d_CFFT_DATA,
+            d_CFFT_KERNEL, // out
+            d_CFFT_DATA, // in data
+            d_CFFT_KERNEL,   // in kernel
             CFFT_H,
             CFFT_W,
             FEATURE_DIM,
             1.0f / (FFT_W * FFT_H)
         );
 
-    CUDA_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_EProd, d_IFFTEProd));
+    CUDA_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_CFFT_KERNEL, d_IFFTEProd));
     CUDA_SAFE_CALL(cudaDeviceSynchronize());
 
     sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D>>>(
@@ -377,18 +360,17 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     plhs[0] = mxGPUCreateMxArrayOnGPU(mxConvolution);
     plhs[1] = mxGPUCreateMxArrayOnGPU(mxFFTKernel);
-    plhs[2] = mxGPUCreateMxArrayOnGPU(mxEProd);
-    plhs[3] = mxGPUCreateMxArrayOnGPU(mxIFFTEProd);
 
     /*
      * The mxGPUArray pointers are host-side structures that refer to device
      * data. These must be destroyed before leaving the MEX function.
      */
     mxGPUDestroyGPUArray(mxFFTData);
+    mxGPUDestroyGPUArray(mxConvolution);    
     mxGPUDestroyGPUArray(mxFFTKernel);
-    mxGPUDestroyGPUArray(mxConvolution);
-    mxGPUDestroyGPUArray(mxEProd);
-    mxGPUDestroyGPUArray(mxIFFTEProd);
+
+    cudaFree(d_IFFTEProd);
+    cudaFree(d_PaddedKernel);
 
     cufftDestroy(FFTplan_R2C);
     mxFree(FFT_dims);
