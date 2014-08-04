@@ -65,7 +65,7 @@ dgc = [dg; conj([dg(end-1:-1:2, 1,:) dg(end-1:-1:2, end:-1:2,:)])];
 figure(1); subplot(121); imagesc(real(dmatlab(:,:,1))); subplot(122); imagesc(real(dgc(:,:,1)));
 figure(3); subplot(131); imagesc(e(:,:,1)); subplot(132); imagesc(real(eifftmatlab(:,:,1)));
 figure(4); subplot(121); subplot(122); imagesc(real(ematlab(:,:,1)))
-figure(5); subplot(121); imagesc(real(ematlab(:,:,1))); 
+figure(5); subplot(121); imagesc(real(ematlab(:,:,1)));
 figure(6); subplot(131); imagesc(cvg); colorbar; subplot(132); imagesc(cvg(1:n + cn - 1,1:m + cm - 1)); colorbar; subplot(133); imagesc(cvmatlab); colorbar;
 figure(7); imagesc(cvg(1:n + cn - 1,1:m + cm - 1) - cvmatlab); colorbar;
 
