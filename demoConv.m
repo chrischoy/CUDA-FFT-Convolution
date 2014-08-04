@@ -51,7 +51,7 @@ dg = gather(d);
 
 e = conv2(a(:,:,1),c(:,:,1));
 for i = 2:k
-  e(:,:,i) = conv2(a(:,:,2),c(:,:,2));
+  e(:,:,i) = conv2(a(:,:,i),c(:,:,i));
 end
 
 cvmatlab = sum(e,3);
