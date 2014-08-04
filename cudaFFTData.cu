@@ -81,6 +81,14 @@ int computeFFTsize(int dataSize){
     //  return iAlignUp(dataSize, 512);
 }
 
+int computeFFTsize16(int dataSize){
+    // Compute the multiple of 16
+    int mod = dataSize / 16;
+    int rem = dataSize % 16;
+
+    return (mod * 16) + ((rem > 0)?16:0);
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Mex Entry
@@ -141,8 +149,11 @@ void mexFunction(int nlhs, mxArray *plhs[],
     PADDING_W = KERNEL_W - 1;
 
     // Derive FFT size from data and kernel dimensions
-    FFT_H = computeFFTsize(DATA_H + PADDING_H);
-    FFT_W = computeFFTsize(DATA_W + PADDING_W);
+    // FFT_H = computeFFTsize(DATA_H + PADDING_H);
+    // FFT_W = computeFFTsize(DATA_W + PADDING_W);
+    FFT_H = computeFFTsize16(DATA_H + PADDING_H);
+    FFT_W = computeFFTsize16(DATA_W + PADDING_W);
+
     if(debug) fprintf(stderr,"FFT size: h=%d, w=%d\n",FFT_H,FFT_W);
 
     DATA_SIZE = DATA_W * DATA_H * FEATURE_DIM * sizeof(float);
@@ -189,6 +200,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     if(debug) fprintf(stderr,"Padding\n");
 
+    int BATCH = FEATURE_DIM;
     int FFT_Dims[] = { FFT_W, FFT_H };
 
     int idist = FFT_W * FFT_H;
@@ -204,7 +216,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
         inembed, 1, idist, // *inembed, istride, idist
         onembed, 1, odist, // *onembed, ostride, odist
         CUFFT_R2C, 
-        FEATURE_DIM)); // batch
+        BATCH)); // batch
 
 
     CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedData, d_CFFT_DATA));

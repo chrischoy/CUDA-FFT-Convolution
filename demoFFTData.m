@@ -3,8 +3,10 @@ MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
 CUDA_ROOT = '/usr/local/cuda-6.0/';
 cuda_compile('cudaFFTData',MATLAB_ROOT, CUDA_ROOT)
 
-c = gpuArray(1);
-cos(c);
+g = gpuDevice(1);
+reset(g);
+cos(gpuArray(1));
+
 clear;
 a = single(rand(16,3));
 a(:,:,2) = single(rand(16,3));

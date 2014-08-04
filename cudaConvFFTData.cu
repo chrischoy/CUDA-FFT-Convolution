@@ -16,7 +16,7 @@ static bool debug = true;
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void padData(
     float *d_PaddedData,
-    float *d_Data,
+    const float *d_Data,
     int fftW,
     int fftH,
     int dataW,
@@ -52,8 +52,8 @@ __device__ void complexConjMulAndScale(cufftComplex &out, cufftComplex a, cufftC
 
 __global__ void elementwiseProductAndNormalize(
     cufftComplex *fft_Output,
-    cufftComplex *fft_PaddedData,
-    cufftComplex *fft_PaddedKernel,
+    const cufftComplex *fft_PaddedData,
+    const cufftComplex *fft_PaddedKernel,
     int FFT_H,
     int FFT_W,
     int FEATURE_DIM,
@@ -75,7 +75,7 @@ __global__ void elementwiseProductAndNormalize(
 /* Support in-place computation, i.e. input and output can be the same */
 __global__ void sumAlongFeatures(
     float *convolutionResult,
-    float *convolutionPerFeature,
+    const float *convolutionPerFeature,
     int FFT_H,
     int FFT_W,
     int FEATURE_DIM
@@ -112,38 +112,6 @@ int iAlignUp(int a, int b){
     return (a % b != 0) ?  (a - a % b + b) : a;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Data configuration
-////////////////////////////////////////////////////////////////////////////////
-int computeFFTsize(int dataSize){
-    //Highest non-zero bit position of dataSize
-    int hiBit;
-    //Neares lower and higher powers of two numbers for dataSize
-    unsigned int lowPOT, hiPOT;
-
-    //Align data size to a multiple of half-warp
-    //in order to have each line starting at properly aligned addresses
-    //for coalesced global memory writes in padKernel() and padData()
-    dataSize = iAlignUp(dataSize, 16);
-
-    //Find highest non-zero bit
-    for(hiBit = 31; hiBit >= 0; hiBit--)
-        if(dataSize & (1U << hiBit)) break;
-
-    //No need to align, if already power of two
-    lowPOT = 1U << hiBit;
-    if(lowPOT == dataSize) return dataSize;
-
-    //Align to a nearest higher power of two, if the size is small enough,
-    //else align only to a nearest higher multiple of 512,
-    //in order to save computation and memory bandwidth
-    hiPOT = 1U << (hiBit + 1);
-    //if(hiPOT <= 1024)
-        return hiPOT;
-    //else 
-    //  return iAlignUp(dataSize, 512);
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Mex Entry
@@ -157,7 +125,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     mxGPUArray *mxFFTKernel;
     mxGPUArray *mxConvolution;
 
-    float2 *d_CFFT_DATA;
+    const float2 *d_CFFT_DATA;
     float2 *d_CFFT_KERNEL;
 
     float *d_CONVOLUTION;
@@ -189,12 +157,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     
     /* Throw an error if the input is not a GPU array. */
-    if ((nrhs!=2) ||
-            !mxIsGPUArray(prhs[0]) || 
-            mxGetNumberOfDimensions(prhs[1]) != 3 || 
-            mxGetClassID(prhs[1]) != mxSINGLE_CLASS) {
+    if ( (nrhs!=2) || !mxIsGPUArray(prhs[0]) )
         mexErrMsgIdAndTxt(errId, errMsg);
-    }
 
     mxFFTData = mxGPUCreateFromMxArray(prhs[0]);
     mxFFT_Dim = mxGPUGetDimensions(mxFFTData);
@@ -209,12 +173,15 @@ void mexFunction(int nlhs, mxArray *plhs[],
     FEATURE_DIM = mxFFT_Dim[2];
 
     FFT_SIZE  = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float);
-    // CFFT_SIZE = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float2);
 
     if(debug) fprintf(stderr,"FFT Data size: h=%d, w=%d, f=%d\n", FFT_H, FFT_W, FEATURE_DIM);
 
     // Get Kernel Data
     if (!mxIsGPUArray(prhs[1])){
+        
+        if( mxGetClassID(prhs[1]) != mxSINGLE_CLASS || mxGetNumberOfDimensions(prhs[1]) != 3 )
+            mexErrMsgIdAndTxt(errId, errMsg);
+
         h_Kernel = (float *)mxGetData(prhs[1]);
         mxKernel_Dim = mxGetDimensions(prhs[1]);
 
@@ -226,8 +193,12 @@ void mexFunction(int nlhs, mxArray *plhs[],
         cudaMalloc((void **)&d_Kernel, KERNEL_SIZE);
         cudaMemcpy(d_Kernel, h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice);
         mxKernel = NULL;
-    }else{
+    }else{ // Kernel is GPU Array
         mxKernel = mxGPUCreateFromMxArray(prhs[1]);
+
+        if ( mxGPUGetClassID(mxKernel) != mxSINGLE_CLASS || mxGPUGetNumberOfDimensions(mxKernel) != 3 )
+            mexErrMsgIdAndTxt(errId, errMsg);
+
         mxKernel_Dim = mxGPUGetDimensions(mxKernel);
 
         // Kernel dimensions
@@ -269,14 +240,12 @@ void mexFunction(int nlhs, mxArray *plhs[],
         );
 
 
-    // Get Complex FFT data handle
+    /* Create a GPUArray to hold the result and get its underlying pointer. */
     mwSize *FFT_dims = (mwSize *)mxMalloc(3 * sizeof(mwSize));
     FFT_dims[0] = FFT_H;
     FFT_dims[1] = FFT_W;
     FFT_dims[2] = FEATURE_DIM;
 
-
-    /* Create a GPUArray to hold the result and get its underlying pointer. */
     d_CFFT_DATA = (float2 *)mxGPUGetDataReadOnly(mxFFTData);
 
     mxConvolution = mxGPUCreateGPUArray(2,
@@ -295,13 +264,12 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     d_CFFT_KERNEL = (cufftComplex *)(mxGPUGetData(mxFFTKernel));
 
+
+    /* FFT Kernel */
     int BATCH = FEATURE_DIM;
     int FFT_Dims[] = { FFT_W, FFT_H };
-    int FFT_DimsTest[] = { FFT_W, FFT_H };
-
     int CFFT_Dims[] = { CFFT_W, CFFT_H };
-    int CFFT_DimsTest[] = { FFT_W, FFT_H };
-    // int CFFT_Dims[] = { FFT_W, FFT_H };
+
     int idist = FFT_W * FFT_H;
     int odist = CFFT_W * CFFT_H;
 
@@ -314,26 +282,21 @@ void mexFunction(int nlhs, mxArray *plhs[],
         CUFFT_R2C, 
         BATCH)); // batch
 
-    if(debug) fprintf(stderr,"Plan R2C done\n");
-
     CUFFT_SAFE_CALL(cufftPlanMany(&FFTplan_C2R, 
         2, // rank
         FFT_Dims,
-        CFFT_DimsTest, 1, odist, // *inembed, istride, idist
-        FFT_DimsTest, 1, idist, // *onembed, ostride, odist
+        CFFT_Dims, 1, odist, // *inembed, istride, idist
+        FFT_Dims, 1, idist, // *onembed, ostride, odist
         CUFFT_C2R, 
         BATCH)); // batch
-
-    if(debug) fprintf(stderr,"Plan C2R done\n");
 
     CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedKernel, d_CFFT_KERNEL));
     CUFFT_SAFE_CALL(cudaDeviceSynchronize());
 
     if(debug) fprintf(stderr,"FFT done\n");
 
-    {
-
-    /* Element-wise multiplication in frequency domain */
+    
+    /* Hadamard product, Element-wise multiplication in frequency domain */
     /* If execute the following, second compile of this file create MATLAB error */
     elementwiseProductAndNormalize<<<dataBlockGrid3D, threadBlock3D>>>(
             d_CFFT_KERNEL, // out
@@ -356,7 +319,6 @@ void mexFunction(int nlhs, mxArray *plhs[],
             FEATURE_DIM
         );
 
-    }
 
     plhs[0] = mxGPUCreateMxArrayOnGPU(mxConvolution);
     plhs[1] = mxGPUCreateMxArrayOnGPU(mxFFTKernel);
@@ -368,9 +330,11 @@ void mexFunction(int nlhs, mxArray *plhs[],
     mxGPUDestroyGPUArray(mxFFTData);
     mxGPUDestroyGPUArray(mxConvolution);    
     mxGPUDestroyGPUArray(mxFFTKernel);
+    if(mxKernel == NULL) mxGPUDestroyGPUArray(mxKernel);
 
-    cudaFree(d_IFFTEProd);
     cudaFree(d_PaddedKernel);
+    cudaFree(d_IFFTEProd);
+    if(mxKernel == NULL) cudaFree(d_Kernel);
 
     cufftDestroy(FFTplan_R2C);
     mxFree(FFT_dims);
