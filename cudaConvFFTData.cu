@@ -166,7 +166,6 @@ void mexFunction(int nlhs, mxArray *plhs[],
     float *d_PaddedKernel;
 
     char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
-    char const * const errMsg = "Invalid input to MEX file.";
 
     /* Choose a reasonably sized number of threads for the block. */
     int const THREAD_PER_BLOCK_H = 16;
@@ -188,7 +187,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     
     /* Throw an error if the input is not a GPU array. */
     if ( (nrhs!=2) || !mxIsGPUArray(prhs[0]) )
-        mexErrMsgIdAndTxt(errId, errMsg);
+        mexErrMsgIdAndTxt(errId, "The data must be FFT-ed real array in GPU");
 
     mxFFTData = mxGPUCreateFromMxArray(prhs[0]);
     mxFFT_Dim = mxGPUGetDimensions(mxFFTData);
@@ -213,7 +212,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     if (!mxIsGPUArray(prhs[1])){
         
         if( mxGetClassID(prhs[1]) != mxSINGLE_CLASS || mxGetNumberOfDimensions(prhs[1]) != 3 )
-            mexErrMsgIdAndTxt(errId, errMsg);
+            mexErrMsgIdAndTxt(errId, "Kernels must be of type float and have features larger than 1");
 
         h_Kernel = (float *)mxGetData(prhs[1]);
         mxKernel_Dim = mxGetDimensions(prhs[1]);
@@ -230,7 +229,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
         mxKernel = mxGPUCreateFromMxArray(prhs[1]);
 
         if ( mxGPUGetClassID(mxKernel) != mxSINGLE_CLASS || mxGPUGetNumberOfDimensions(mxKernel) != 3 )
-            mexErrMsgIdAndTxt(errId, errMsg);
+            mexErrMsgIdAndTxt(errId, "Kernels must be of type float and have features larger than 1");
 
         mxKernel_Dim = mxGPUGetDimensions(mxKernel);
 
@@ -245,7 +244,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     if(debug) fprintf(stderr,"Kernel size: h=%d, w=%d\n", KERNEL_H, KERNEL_W);
 
     if (FEATURE_DIM != mxKernel_Dim[2] || KERNEL_W > FFT_W || KERNEL_H > FFT_H ){
-        mexErrMsgIdAndTxt(errId, errMsg);
+        mexErrMsgIdAndTxt(errId, "Kernel and Data must have the same number of features and kernel size should be smaller than data size");
     }
 
 
