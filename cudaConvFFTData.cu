@@ -149,8 +149,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
     const mwSize * mxFFT_Dim;
     // int MblocksPerGrid, NblocksPerGrid;
     int KERNEL_H, KERNEL_W,
-        CFFT_H, CFFT_W, CONV_H, CONV_W, FEATURE_DIM,
-        KERNEL_SIZE, CFFT_SIZE, CONV_SIZE;
+        CFFT_H, CFFT_W, FFT_H, FFT_W, FEATURE_DIM,
+        KERNEL_SIZE, CFFT_SIZE, FFT_SIZE, CONV_SIZE;
 
     
     /* Initialize the MathWorks GPU API. */
@@ -169,17 +169,16 @@ void mexFunction(int nlhs, mxArray *plhs[],
     CFFT_H = mxFFT_Dim[0];
     CFFT_W = mxFFT_Dim[1];
 
-    // This notation is confusion. Change it to CONV_H and CONV_W
-    CONV_H = (mxFFT_Dim[0] - 1) * 2;
-    CONV_W = mxFFT_Dim[1];
+    FFT_H = (mxFFT_Dim[0] - 1) * 2;
+    FFT_W = mxFFT_Dim[1];
 
     FEATURE_DIM = mxFFT_Dim[2];
 
     CFFT_SIZE = CFFT_W * CFFT_H * FEATURE_DIM * sizeof(cufftComplex);
-
-    CONV_SIZE = CONV_W * CONV_H * FEATURE_DIM * sizeof(float);
-
-    if(debug) fprintf(stderr,"FFT Data size: h=%d, w=%d, f=%d\n", CONV_H, CONV_W, FEATURE_DIM);
+    FFT_SIZE  = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float);
+    CONV_SIZE = FFT_W  * FFT_H  * sizeof(float);
+    
+    if(debug) fprintf(stderr,"FFT Data size: h=%d, w=%d, f=%d\n", FFT_H, FFT_W, FEATURE_DIM);
 
     // Get Kernel Data
     if (!mxIsGPUArray(prhs[1])){
@@ -216,29 +215,29 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     if(debug) fprintf(stderr,"Kernel size: h=%d, w=%d\n", KERNEL_H, KERNEL_W);
 
-    if (FEATURE_DIM != mxKernel_Dim[2] || KERNEL_W > CONV_W || KERNEL_H > CONV_H ){
+    if (FEATURE_DIM != mxKernel_Dim[2] || KERNEL_W > FFT_W || KERNEL_H > FFT_H ){
         mexErrMsgIdAndTxt(errId, errMsg);
     }
 
 
     /*  Pad Kernel */
-    cudaMalloc((void **)&d_PaddedKernel,    CONV_SIZE);
-    cudaMalloc((void **)&d_IFFTEProd,       CONV_SIZE);
+    cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE);
+    cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE);
 
     dim3 threadBlock3D(THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D);
-    dim3 dataBlockGrid3D( iDivUp(CONV_W, threadBlock3D.x), 
-                        iDivUp(CONV_H, threadBlock3D.y), 
+    dim3 dataBlockGrid3D( iDivUp(FFT_W, threadBlock3D.x), 
+                        iDivUp(FFT_H, threadBlock3D.y), 
                         iDivUp(FEATURE_DIM, threadBlock3D.z));
 
     dim3 threadBlock2D( THREAD_PER_BLOCK_2D, THREAD_PER_BLOCK_2D);
-    dim3 dataBlockGrid2D( iDivUp(CONV_W, threadBlock2D.x), 
-                        iDivUp(CONV_H, threadBlock2D.y));
+    dim3 dataBlockGrid2D( iDivUp(FFT_W, threadBlock2D.x), 
+                        iDivUp(FFT_H, threadBlock2D.y));
 
     padData<<<dataBlockGrid3D, threadBlock3D>>>(
         d_PaddedKernel,
         d_Kernel,
-        CONV_W,
-        CONV_H,
+        FFT_W,
+        FFT_H,
         KERNEL_W,
         KERNEL_H,
         FEATURE_DIM
@@ -246,15 +245,15 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     /* Create a GPUArray to hold the result and get its underlying pointer. */
+    mwSize *FFT_dims = (mwSize *)mxMalloc(3 * sizeof(mwSize));
+    FFT_dims[0] = FFT_H;
+    FFT_dims[1] = FFT_W;
+    FFT_dims[2] = FEATURE_DIM;
+
     d_CFFT_DATA = (cufftComplex *)mxGPUGetDataReadOnly(mxFFTData);
 
-    mwSize *mxCONV_dims = (mwSize *)mxMalloc(3 * sizeof(mwSize));
-    mxCONV_dims[0] = CONV_H;
-    mxCONV_dims[1] = CONV_W;
-    mxCONV_dims[2] = FEATURE_DIM;
-
     mxConvolution = mxGPUCreateGPUArray(2,
-                            mxCONV_dims, // Third element will not be accessed
+                            FFT_dims, // Third element will not be accessed
                             mxSINGLE_CLASS,
                             mxREAL,
                             MX_GPU_DO_NOT_INITIALIZE);
@@ -272,26 +271,26 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     /* FFT Kernel */
     int BATCH = FEATURE_DIM;
-    int CONV_Dims[] = { CONV_W, CONV_H };
+    int FFT_Dims[] = { FFT_W, FFT_H };
     int CFFT_Dims[] = { CFFT_W, CFFT_H };
 
-    int idist = CONV_W * CONV_H;
+    int idist = FFT_W * FFT_H;
     int odist = CFFT_W * CFFT_H;
 
     cufftHandle FFTplan_R2C, FFTplan_C2R;
     CUFFT_SAFE_CALL(cufftPlanMany(&FFTplan_R2C, 
         2, // rank
-        CONV_Dims, 
-        CONV_Dims, 1, idist, // *inembed, istride, idist
+        FFT_Dims, 
+        FFT_Dims, 1, idist, // *inembed, istride, idist
         CFFT_Dims, 1, odist, // *onembed, ostride, odist
         CUFFT_R2C, 
         BATCH)); // batch
 
     CUFFT_SAFE_CALL(cufftPlanMany(&FFTplan_C2R, 
         2, // rank
-        CONV_Dims,
+        FFT_Dims,
         CFFT_Dims, 1, odist, // *inembed, istride, idist
-        CONV_Dims, 1, idist, // *onembed, ostride, odist
+        FFT_Dims, 1, idist, // *onembed, ostride, odist
         CUFFT_C2R, 
         BATCH)); // batch
 
@@ -310,7 +309,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
             CFFT_H,
             CFFT_W,
             FEATURE_DIM,
-            1.0f / (CONV_W * CONV_H)
+            1.0f / (FFT_W * FFT_H)
         );
 
     CUDA_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_CFFT_KERNEL, d_IFFTEProd));
@@ -319,8 +318,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
     sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D>>>(
             d_CONVOLUTION,
             d_IFFTEProd,
-            CONV_H,
-            CONV_W,
+            FFT_H,
+            FFT_W,
             FEATURE_DIM
         );
 
@@ -342,5 +341,5 @@ void mexFunction(int nlhs, mxArray *plhs[],
     if(mxKernel == NULL) cudaFree(d_Kernel);
 
     cufftDestroy(FFTplan_R2C);
-    mxFree(mxCONV_dims);
+    mxFree(FFT_dims);
 }

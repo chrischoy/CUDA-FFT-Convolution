@@ -1,8 +1,10 @@
 % demo
 clear;
 g = gpuDevice(1);
-cos(gpuArray(1));
 reset(g);
+
+% matlab gpu dynamic library will be loaded.
+cos(gpuArray(1));
 
 MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
 CUDA_ROOT = '/usr/local/cuda-6.0/';
@@ -16,7 +18,6 @@ k = 4;
 cn = 3;
 cm = 3;
 a = single(rand(n,m));
-
 for i = 2:k
   a(:,:,i) = single(rand(n,m));
 end
@@ -24,16 +25,18 @@ end
 c = zeros(3,3,k,'single');
 c(:,:,1) = single([1 2 3;4 5 6; 7 8 9]);
 for i = 2:k
-  c(:,:,i) = single(rand(3));
+  c(:,:,i) = single(rand(cn,cm));
 end
 
 a(5:7,2:4,1) = c(:,:,1);
 a(21:23,1:3,2) = c(:,:,1);
+a(1:3,m-2:m,k) = c(:,:,1);
+c(:,:,k) = c(:,:,1);
 
 bmatlab = fft2(a(:,:,1),2*n,2*m);
 bmatlab(:,:,2) = fft2(a(:,:,2),2*n,2*m);
 
-b = cudaFFTData(a, 3,3);
+b = cudaFFTData(a, cn,cm);
 % b = gpuArray(bmatlab(1:25,:,:));
 
 
