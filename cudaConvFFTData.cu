@@ -1,10 +1,38 @@
 #include <cuda.h>
 #include <cufft.h>
-#include "cutil.h"
+// #include "cutil.h"
 #include "mex.h"
 #include "gpu/mxGPUArray.h"
 
 #define IMUL(a, b) __mul24(a, b)
+
+#  define CUDA_SAFE_CALL_NO_SYNC( call) do {                                 \
+    cudaError err = call;                                                    \
+    if( cudaSuccess != err) {                                                \
+        fprintf(stderr, "Cuda error in file '%s' in line %i .\n",            \
+                __FILE__, __LINE__);                                         \
+        exit(EXIT_FAILURE);                                                  \
+    } } while (0)
+
+#  define CUDA_SAFE_CALL( call) do {                                         \
+    CUDA_SAFE_CALL_NO_SYNC(call);                                            \
+    cudaError err = cudaThreadSynchronize();                                 \
+    if( cudaSuccess != err) {                                                \
+        fprintf(stderr, "Cuda error in file '%s' in line %i .\n",            \
+                __FILE__, __LINE__ );                                        \
+        exit(EXIT_FAILURE);                                                  \
+    } } while (0)
+
+#  define CUFFT_SAFE_CALL( call) do {                                        \
+    cufftResult err = call;                                                  \
+    if( CUFFT_SUCCESS != err) {                                              \
+        fprintf(stderr, "CUFFT error in file '%s' in line %i.\n",            \
+                __FILE__, __LINE__);                                         \
+        exit(EXIT_FAILURE);                                                  \
+    } } while (0)
+
+
+
 static bool debug = true;
 
 /*
@@ -124,7 +152,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
     const mxGPUArray *mxKernel;
     mxGPUArray *mxFFTKernel;
     mxGPUArray *mxConvolution;
-
+    mxArray *convolutionResult;
+    
     /* cufftComplex is float2 */
     const cufftComplex *d_CFFT_DATA;
     cufftComplex *d_CFFT_KERNEL;
@@ -133,6 +162,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     float *d_IFFTEProd;
 
     float *h_Kernel;
+    float *h_CONVOLUTION;
     float *d_Kernel;
     float *d_PaddedKernel;
 
@@ -174,7 +204,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     FEATURE_DIM = mxFFT_Dim[2];
 
-    CFFT_SIZE = CFFT_W * CFFT_H * FEATURE_DIM * sizeof(cufftComplex);
+    CFFT_SIZE = CFFT_W * CFFT_H * FEATURE_DIM * sizeof(float2);
     FFT_SIZE  = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float);
     CONV_SIZE = FFT_W  * FFT_H  * sizeof(float);
     
@@ -194,8 +224,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
         KERNEL_W = mxKernel_Dim[1];
         KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
 
-        cudaMalloc((void **)&d_Kernel, KERNEL_SIZE);
-        cudaMemcpy(d_Kernel, h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice);
+        CUDA_SAFE_CALL(cudaMalloc((void **)&d_Kernel, KERNEL_SIZE));
+        CUDA_SAFE_CALL(cudaMemcpy(d_Kernel, h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
         mxKernel = NULL;
     }else{ // Kernel is GPU Array
         mxKernel = mxGPUCreateFromMxArray(prhs[1]);
@@ -221,8 +251,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     /*  Pad Kernel */
-    cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE);
-    cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE);
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE));
 
     dim3 threadBlock3D(THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D);
     dim3 dataBlockGrid3D( iDivUp(FFT_W, threadBlock3D.x), 
@@ -245,29 +275,32 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     /* Create a GPUArray to hold the result and get its underlying pointer. */
-    mwSize *FFT_dims = (mwSize *)mxMalloc(3 * sizeof(mwSize));
-    FFT_dims[0] = FFT_H;
-    FFT_dims[1] = FFT_W;
-    FFT_dims[2] = FEATURE_DIM;
+    // mwSize *FFT_dims = (mwSize *)mxMalloc(2 * sizeof(mwSize));
+    // FFT_dims[0] = FFT_H;
+    // FFT_dims[1] = FFT_W;
+    // FFT_dims[2] = FEATURE_DIM;
 
     d_CFFT_DATA = (cufftComplex *)mxGPUGetDataReadOnly(mxFFTData);
 
-    mxConvolution = mxGPUCreateGPUArray(2,
-                            FFT_dims, // Third element will not be accessed
-                            mxSINGLE_CLASS,
-                            mxREAL,
-                            MX_GPU_DO_NOT_INITIALIZE);
+    // mxConvolution = mxGPUCreateGPUArray(2,
+    //                         FFT_dims, // Third element will not be accessed
+    //                         mxSINGLE_CLASS,
+    //                         mxREAL,
+    //                         MX_GPU_DO_NOT_INITIALIZE);
 
-    d_CONVOLUTION = (cufftReal *)(mxGPUGetData(mxConvolution));
+    // d_CONVOLUTION = (cufftReal *)(mxGPUGetData(mxConvolution));
 
-    mxFFTKernel = mxGPUCreateGPUArray(3,
-                            mxFFT_Dim,
-                            mxSINGLE_CLASS,
-                            mxCOMPLEX,
-                            MX_GPU_DO_NOT_INITIALIZE);
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_CONVOLUTION, CONV_SIZE));
 
-    d_CFFT_KERNEL = (cufftComplex *)(mxGPUGetData(mxFFTKernel));
+    // mxFFTKernel = mxGPUCreateGPUArray(3,
+    //                         mxFFT_Dim,
+    //                         mxSINGLE_CLASS,
+    //                         mxCOMPLEX,
+    //                         MX_GPU_DO_NOT_INITIALIZE);
 
+    // d_CFFT_KERNEL = (cufftComplex *)(mxGPUGetData(mxFFTKernel));
+
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_CFFT_KERNEL, CFFT_SIZE));
 
     /* FFT Kernel */
     int BATCH = FEATURE_DIM;
@@ -295,7 +328,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
         BATCH)); // batch
 
     CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedKernel, d_CFFT_KERNEL));
-    CUFFT_SAFE_CALL(cudaDeviceSynchronize());
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
 
     if(debug) fprintf(stderr,"FFT done\n");
 
@@ -312,7 +345,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
             1.0f / (FFT_W * FFT_H)
         );
 
-    CUDA_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_CFFT_KERNEL, d_IFFTEProd));
+    CUFFT_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_CFFT_KERNEL, d_IFFTEProd));
     CUDA_SAFE_CALL(cudaDeviceSynchronize());
 
     sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D>>>(
@@ -323,23 +356,36 @@ void mexFunction(int nlhs, mxArray *plhs[],
             FEATURE_DIM
         );
 
+    mwSize *FFT_dims = (mwSize *)mxMalloc(2 * sizeof(mwSize));
+    FFT_dims[0] = FFT_H;
+    FFT_dims[1] = FFT_W;
 
-    plhs[0] = mxGPUCreateMxArrayOnGPU(mxConvolution);
-    plhs[1] = mxGPUCreateMxArrayOnGPU(mxFFTKernel);
+    convolutionResult = mxCreateNumericArray(2, FFT_dims, mxSINGLE_CLASS, mxREAL);
+    h_CONVOLUTION = (float *)mxGetData(convolutionResult);
+    CUDA_SAFE_CALL(cudaMemcpy(h_CONVOLUTION, d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
+
+    plhs[0] = convolutionResult;
+    // plhs[1] = mxGPUCreateMxArrayOnGPU(mxFFTKernel);
 
     /*
      * The mxGPUArray pointers are host-side structures that refer to device
      * data. These must be destroyed before leaving the MEX function.
      */
     mxGPUDestroyGPUArray(mxFFTData);
-    mxGPUDestroyGPUArray(mxConvolution);    
-    mxGPUDestroyGPUArray(mxFFTKernel);
+    // mxGPUDestroyGPUArray(mxConvolution);    
+    // mxGPUDestroyGPUArray(mxFFTKernel);
+    
+    cufftDestroy(FFTplan_R2C);
+    cufftDestroy(FFTplan_C2R);
+
     if(mxKernel == NULL) mxGPUDestroyGPUArray(mxKernel);
 
     cudaFree(d_PaddedKernel);
     cudaFree(d_IFFTEProd);
+    cudaFree(d_CONVOLUTION);
+    cudaFree(d_CFFT_KERNEL);
+
     if(mxKernel == NULL) cudaFree(d_Kernel);
 
-    cufftDestroy(FFTplan_R2C);
     mxFree(FFT_dims);
 }

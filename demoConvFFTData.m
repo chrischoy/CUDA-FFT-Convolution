@@ -13,7 +13,7 @@ cuda_compile('cudaConvFFTData',MATLAB_ROOT, CUDA_ROOT, 1)
 clear;
 n = 64;
 m = 8;
-k = 4;
+k = 3;
 
 cn = 3;
 cm = 3;
@@ -47,9 +47,10 @@ dmatlab(:,:,2) = fft2(c(:,:,2),2*n,16);
 ematlab = dmatlab .* (bmatlab);
 gc = gpuArray(single(c));
 gccell = {gc, gc+1};
-[cv, d] = cudaConvFFTData(b,gc);
+% [cv, d] = cudaConvFFTData(b,gc);
+cv = cudaConvFFTData(b,gc);
 cvg = gather(cv);
-dg = gather(d);
+% dg = gather(d);
 
 
 e = conv2(a(:,:,1),c(:,:,1));
@@ -63,9 +64,9 @@ eifftmatlab = ifft2(ematlab(:,:,1));
 eifftmatlab(:,:,2) = ifft2(ematlab(:,:,2));
 
 
-dgc = [dg; conj([dg(end-1:-1:2, 1,:) dg(end-1:-1:2, end:-1:2,:)])];
+% dgc = [dg; conj([dg(end-1:-1:2, 1,:) dg(end-1:-1:2, end:-1:2,:)])];
+% figure(1); subplot(121); imagesc(real(dmatlab(:,:,1))); subplot(122); imagesc(real(dgc(:,:,1)));
 
-figure(1); subplot(121); imagesc(real(dmatlab(:,:,1))); subplot(122); imagesc(real(dgc(:,:,1)));
 figure(3); subplot(131); imagesc(e(:,:,1)); subplot(132); imagesc(real(eifftmatlab(:,:,1)));
 figure(4); subplot(121); subplot(122); imagesc(real(ematlab(:,:,1)))
 figure(5); subplot(121); imagesc(real(ematlab(:,:,1)));
