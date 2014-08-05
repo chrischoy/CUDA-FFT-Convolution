@@ -1,14 +1,14 @@
 % demo
-clear;
-g = gpuDevice(1);
-reset(g);
-
-% matlab gpu dynamic library will be loaded.
-cos(gpuArray(1));
-
-MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
-CUDA_ROOT = '/usr/local/cuda-6.0/';
-cuda_compile('cudaConvFFTData',MATLAB_ROOT, CUDA_ROOT, 1)
+% clear;
+% g = gpuDevice(1);
+% reset(g);
+% 
+% % matlab gpu dynamic library will be loaded.
+% cos(gpuArray(1));
+% 
+% MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
+% CUDA_ROOT = '/usr/local/cuda-6.0/';
+% cuda_compile('cudaConvFFTData',MATLAB_ROOT, CUDA_ROOT, 1)
 
 clear;
 n = 64;
