@@ -1,6 +1,5 @@
 #include <cuda.h>
 #include <cufft.h>
-// #include "cutil.h"
 #include "mex.h"
 #include "gpu/mxGPUArray.h"
 

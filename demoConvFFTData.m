@@ -1,10 +1,10 @@
 % demo
-% clear;
-% g = gpuDevice(1);
-% reset(g);
-% 
-% % matlab gpu dynamic library will be loaded.
-% cos(gpuArray(1));
+clear;
+g = gpuDevice(1);
+reset(g);
+
+% matlab gpu dynamic library will be loaded.
+cos(gpuArray(1));
 % 
 % MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
 % CUDA_ROOT = '/usr/local/cuda-6.0/';
@@ -32,6 +32,11 @@ a(5:7,2:4,1) = c(:,:,1);
 a(21:23,1:3,2) = c(:,:,1);
 a(1:3,m-2:m,k) = c(:,:,1);
 c(:,:,k) = c(:,:,1);
+
+
+for i = 1:k
+  c(:,:,i) = c(end:-1:1,end:-1:1,i);
+end
 
 bmatlab = fft2(a(:,:,1),2*n,2*m);
 bmatlab(:,:,2) = fft2(a(:,:,2),2*n,2*m);
