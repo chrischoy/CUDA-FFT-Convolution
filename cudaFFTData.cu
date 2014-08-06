@@ -5,7 +5,7 @@
 #include "gpu/mxGPUArray.h"
 
 #define IMUL(a, b) __mul24(a, b)
-static bool debug = true;
+static bool debug = false;
 
 /*
  * Device Code

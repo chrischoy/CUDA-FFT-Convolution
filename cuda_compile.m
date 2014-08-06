@@ -7,9 +7,9 @@ end
 eval(['!rm ' func_name '.o']);
 
 if optimize
-  eval(sprintf('!nvcc -Xcompiler -Wall -Xcompiler -Wextra  -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
+  eval(sprintf('!nvcc -O3 -DNDEBUG -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
 else
-  eval(sprintf('!nvcc -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
+  eval(sprintf('!nvcc -O3 -DNDEBUG -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
 end
 
 eval(['mex -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' cudaroot '/lib64 -lcudart -lcufft -L' matlabroot '/bin/glnxa64 -lmwgpu']);

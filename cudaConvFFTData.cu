@@ -32,7 +32,7 @@
 
 
 
-static bool debug = true;
+static bool debug = false;
 
 /*
  * Device Code
@@ -176,7 +176,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     const mwSize * mxKernel_Dim;
     const mwSize * mxFFT_Dim;
     // int MblocksPerGrid, NblocksPerGrid;
-    int KERNEL_H, KERNEL_W,
+    int KERNEL_H, KERNEL_W, N_KERNEL,
         CFFT_H, CFFT_W, FFT_H, FFT_W, FEATURE_DIM,
         KERNEL_SIZE, CFFT_SIZE, FFT_SIZE, CONV_SIZE;
 
@@ -208,45 +208,14 @@ void mexFunction(int nlhs, mxArray *plhs[],
     
     if(debug) fprintf(stderr,"FFT Data size: h=%d, w=%d, f=%d\n", FFT_H, FFT_W, FEATURE_DIM);
 
-    // Get Kernel Data
-    if (!mxIsGPUArray(prhs[1])){
-        
-        if( mxGetClassID(prhs[1]) != mxSINGLE_CLASS || mxGetNumberOfDimensions(prhs[1]) != 3 )
-            mexErrMsgIdAndTxt(errId, "Kernels must be of type float and have features larger than 1");
+    if (mxGetClassID(prhs[1]) != mxCELL_CLASS)
+        mexErrMsgIdAndTxt(errId, "Kernel must be a cell array");
 
-        h_Kernel = (float *)mxGetData(prhs[1]);
-        mxKernel_Dim = mxGetDimensions(prhs[1]);
+    mwSize nKernel = mxGetNumberOfElements(prhs[1]);
+    N_KERNEL = (int)nKernel;
+    plhs[0] = mxCreateCellMatrix(1, N_KERNEL);
 
-        // Kernel dimensions
-        KERNEL_H = mxKernel_Dim[0];
-        KERNEL_W = mxKernel_Dim[1];
-        KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
-
-        CUDA_SAFE_CALL(cudaMalloc((void **)&d_Kernel, KERNEL_SIZE));
-        CUDA_SAFE_CALL(cudaMemcpy(d_Kernel, h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
-        mxKernel = NULL;
-    }else{ // Kernel is GPU Array
-        mxKernel = mxGPUCreateFromMxArray(prhs[1]);
-
-        if ( mxGPUGetClassID(mxKernel) != mxSINGLE_CLASS || mxGPUGetNumberOfDimensions(mxKernel) != 3 )
-            mexErrMsgIdAndTxt(errId, "Kernels must be of type float and have features larger than 1");
-
-        mxKernel_Dim = mxGPUGetDimensions(mxKernel);
-
-        // Kernel dimensions
-        KERNEL_H = mxKernel_Dim[0];
-        KERNEL_W = mxKernel_Dim[1];
-        KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
-
-        d_Kernel = (float *)mxGPUGetDataReadOnly(mxKernel);
-    }
-
-    if(debug) fprintf(stderr,"Kernel size: h=%d, w=%d\n", KERNEL_H, KERNEL_W);
-
-    if (FEATURE_DIM != mxKernel_Dim[2] || KERNEL_W > FFT_W || KERNEL_H > FFT_H ){
-        mexErrMsgIdAndTxt(errId, "Kernel and Data must have the same number of features and kernel size should be smaller than data size");
-    }
-
+    if(debug) fprintf(stderr,"N Kernel: %d\n", N_KERNEL);
 
     /*  Pad Kernel */
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE));
@@ -261,15 +230,6 @@ void mexFunction(int nlhs, mxArray *plhs[],
     dim3 dataBlockGrid2D( iDivUp(FFT_W, threadBlock2D.x), 
                         iDivUp(FFT_H, threadBlock2D.y));
 
-    padData<<<dataBlockGrid3D, threadBlock3D>>>(
-        d_PaddedKernel,
-        d_Kernel,
-        FFT_W,
-        FFT_H,
-        KERNEL_W,
-        KERNEL_H,
-        FEATURE_DIM
-        );
 
 
     /* Create a GPUArray to hold the result and get its underlying pointer. */
@@ -300,6 +260,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_CFFT_KERNEL, CFFT_SIZE));
 
+
     /* FFT Kernel */
     int BATCH = FEATURE_DIM;
     int FFT_Dims[] = { FFT_W, FFT_H };
@@ -324,45 +285,102 @@ void mexFunction(int nlhs, mxArray *plhs[],
         FFT_Dims, 1, idist, // *onembed, ostride, odist
         CUFFT_C2R, 
         BATCH)); // batch
-
-    CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedKernel, d_CFFT_KERNEL));
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
-
-    if(debug) fprintf(stderr,"FFT done\n");
-
     
-    /* Hadamard product, Element-wise multiplication in frequency domain */
-    /* If execute the following, second compile of this file create MATLAB error */
-    elementwiseProductAndNormalize<<<dataBlockGrid3D, threadBlock3D>>>(
-            d_CFFT_KERNEL, // out
-            d_CFFT_DATA, // in data
-            d_CFFT_KERNEL,   // in kernel
-            CFFT_H,
-            CFFT_W,
-            FEATURE_DIM,
-            1.0f / (FFT_W * FFT_H)
-        );
-
-    CUFFT_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_CFFT_KERNEL, d_IFFTEProd));
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
-
-    sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D>>>(
-            d_CONVOLUTION,
-            d_IFFTEProd,
-            FFT_H,
-            FFT_W,
-            FEATURE_DIM
-        );
-
     mwSize *FFT_dims = (mwSize *)mxMalloc(2 * sizeof(mwSize));
-    FFT_dims[0] = FFT_H;
-    FFT_dims[1] = FFT_W;
+        FFT_dims[0] = FFT_H;
+        FFT_dims[1] = FFT_W;
 
-    convolutionResult = mxCreateNumericArray(2, FFT_dims, mxSINGLE_CLASS, mxREAL);
-    h_CONVOLUTION = (float *)mxGetData(convolutionResult);
-    CUDA_SAFE_CALL(cudaMemcpy(h_CONVOLUTION, d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
+    /* For each kernel iterate */
+    for (int kernelIdx = 0; kernelIdx < N_KERNEL; kernelIdx++){
+        
+        // Get Kernel Data
+        const mxArray *mxCurrentCell = mxGetCell(prhs[1], kernelIdx);
+        if (!mxIsGPUArray(mxCurrentCell)){
+            
+            if( mxGetClassID(mxCurrentCell) != mxSINGLE_CLASS || mxGetNumberOfDimensions(mxCurrentCell) != 3 )
+                mexErrMsgIdAndTxt(errId, "Kernels must be of type float and have features larger than 1");
 
-    plhs[0] = convolutionResult;
+            h_Kernel = (float *)mxGetData(mxCurrentCell);
+            mxKernel_Dim = mxGetDimensions(mxCurrentCell);
+
+            // Kernel dimensions
+            KERNEL_H = mxKernel_Dim[0];
+            KERNEL_W = mxKernel_Dim[1];
+            KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
+
+            CUDA_SAFE_CALL(cudaMalloc((void **)&d_Kernel, KERNEL_SIZE));
+            CUDA_SAFE_CALL(cudaMemcpy(d_Kernel, h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
+            mxKernel = NULL;
+        }else{ // Kernel is GPU Array
+            mxKernel = mxGPUCreateFromMxArray(mxCurrentCell);
+
+            if ( mxGPUGetClassID(mxKernel) != mxSINGLE_CLASS || mxGPUGetNumberOfDimensions(mxKernel) != 3 )
+                mexErrMsgIdAndTxt(errId, "Kernels must be of type float and have features larger than 1");
+
+            mxKernel_Dim = mxGPUGetDimensions(mxKernel);
+
+            // Kernel dimensions
+            KERNEL_H = mxKernel_Dim[0];
+            KERNEL_W = mxKernel_Dim[1];
+            KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
+
+            d_Kernel = (float *)mxGPUGetDataReadOnly(mxKernel);
+        }
+
+        if(debug) fprintf(stderr,"Kernel size: h=%d, w=%d\n", KERNEL_H, KERNEL_W);
+
+        if (FEATURE_DIM != mxKernel_Dim[2] || KERNEL_W > FFT_W || KERNEL_H > FFT_H ){
+            mexErrMsgIdAndTxt(errId, "Kernel and Data must have the same number of features and kernel size should be smaller than data size");
+        }
+
+        padData<<<dataBlockGrid3D, threadBlock3D>>>(
+            d_PaddedKernel,
+            d_Kernel,
+            FFT_W,
+            FFT_H,
+            KERNEL_W,
+            KERNEL_H,
+            FEATURE_DIM
+            );
+
+
+        CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedKernel, d_CFFT_KERNEL));
+        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+
+        if(debug) fprintf(stderr,"FFT done\n");
+
+        
+        /* Hadamard product, Element-wise multiplication in frequency domain */
+        /* If execute the following, second compile of this file create MATLAB error */
+        elementwiseProductAndNormalize<<<dataBlockGrid3D, threadBlock3D>>>(
+                d_CFFT_KERNEL, // out
+                d_CFFT_DATA, // in data
+                d_CFFT_KERNEL,   // in kernel
+                CFFT_H,
+                CFFT_W,
+                FEATURE_DIM,
+                1.0f / (FFT_W * FFT_H)
+            );
+
+        CUFFT_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_CFFT_KERNEL, d_IFFTEProd));
+        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+
+        sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D>>>(
+                d_CONVOLUTION,
+                d_IFFTEProd,
+                FFT_H,
+                FFT_W,
+                FEATURE_DIM
+            );
+
+
+
+        convolutionResult = mxCreateNumericArray(2, FFT_dims, mxSINGLE_CLASS, mxREAL);
+        h_CONVOLUTION = (float *)mxGetData(convolutionResult);
+        CUDA_SAFE_CALL(cudaMemcpy(h_CONVOLUTION, d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
+
+        mxSetCell(plhs[0], kernelIdx, convolutionResult);
+    }
     // plhs[1] = mxGPUCreateMxArrayOnGPU(mxFFTKernel);
 
     /*

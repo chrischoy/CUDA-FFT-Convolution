@@ -53,8 +53,9 @@ ematlab = dmatlab .* (bmatlab);
 gc = gpuArray(single(c));
 gccell = {gc, gc+1};
 % [cv, d] = cudaConvFFTData(b,gc);
-cv = cudaConvFFTData(b,gc);
-cvg = gather(cv);
+cvcell = cudaConvFFTData(b,gccell);
+cvg = cvcell{1};
+% cvg = gather(cv);
 % dg = gather(d);
 
 
