@@ -168,10 +168,10 @@ void mexFunction(int nlhs, mxArray *plhs[],
     char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
 
     /* Choose a reasonably sized number of threads for the block. */
-    int const THREAD_PER_BLOCK_H = 16;
-    int const THREAD_PER_BLOCK_W = 8;
-    int const THREAD_PER_BLOCK_D = 8;
-    int const THREAD_PER_BLOCK_2D = 32;
+    int THREAD_PER_BLOCK_H = 16;
+    int THREAD_PER_BLOCK_W = 8;
+    int THREAD_PER_BLOCK_D = 8;
+    int THREAD_PER_BLOCK_2D = 32;
 
     const mwSize * mxKernel_Dim;
     const mwSize * mxFFT_Dim;
@@ -186,8 +186,20 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     
     /* Throw an error if the input is not a GPU array. */
-    if ( (nrhs!=2) || !mxIsGPUArray(prhs[0]) )
+    if ( (nrhs < 2) || (nrhs > 3) || !mxIsGPUArray(prhs[0]) )
         mexErrMsgIdAndTxt(errId, "The data must be FFT-ed real array in GPU");
+
+    if (( nrhs == 3)  && mxGetNumberOfElements(prhs[2]) != 4)
+        mexErrMsgIdAndTxt(errId, "CUDA Thread Size must be 4 integers : THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D\nYou must choose size such that total thread will not be larger than MaxThreadsPerBlock");
+
+    if ( nrhs == 3 ){
+        const double* threadSize = (double *)mxGetData(prhs[2]);
+        THREAD_PER_BLOCK_H = (int)threadSize[0];
+        THREAD_PER_BLOCK_W = (int)threadSize[1];
+        THREAD_PER_BLOCK_D = (int)threadSize[2];
+        THREAD_PER_BLOCK_2D = (int)threadSize[3];
+        if(debug) fprintf(stderr,"Thread size: H=%d, W=%d, D=%d, 2D=%d\n", THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D);
+    }
 
     mxFFTData = mxGPUCreateFromMxArray(prhs[0]);
     mxFFT_Dim = mxGPUGetDimensions(mxFFTData);

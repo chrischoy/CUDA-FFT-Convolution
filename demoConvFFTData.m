@@ -8,6 +8,10 @@ cos(gpuArray(1));
 
 MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
 CUDA_ROOT = '/usr/local/cuda-6.0/';
+if ismac
+  MATLAB_ROOT = '/Applications/MATLAB_R2014a.app/';
+  CUDA_ROOT = '/usr/local/cuda/';
+end
 cuda_compile('cudaConvFFTData',MATLAB_ROOT, CUDA_ROOT, 1)
 
 clear;
@@ -52,8 +56,8 @@ dmatlab(:,:,2) = fft2(c(:,:,2),2*n,16);
 ematlab = dmatlab .* (bmatlab);
 gc = gpuArray(single(c));
 gccell = {gc, gc+1};
-% [cv, d] = cudaConvFFTData(b,gc);
-cvcell = cudaConvFFTData(b,gccell);
+% cvcell = cudaConvFFTData(b,gccell);
+cvcell = cudaConvFFTData(b,gccell, [8, 8, 8, 16]);
 cvg = cvcell{1};
 % cvg = gather(cv);
 % dg = gather(d);
