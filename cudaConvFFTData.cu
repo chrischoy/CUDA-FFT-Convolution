@@ -2,36 +2,11 @@
 #include <cufft.h>
 #include "mex.h"
 #include "gpu/mxGPUArray.h"
-
-#define IMUL(a, b) __mul24(a, b)
-
-#  define CUDA_SAFE_CALL_NO_SYNC( call) do {                                 \
-    cudaError err = call;                                                    \
-    if( cudaSuccess != err) {                                                \
-        fprintf(stderr, "Cuda error in file '%s' in line %i .\n",            \
-                __FILE__, __LINE__);                                         \
-        exit(EXIT_FAILURE);                                                  \
-    } } while (0)
-
-#  define CUDA_SAFE_CALL( call) do {                                         \
-    CUDA_SAFE_CALL_NO_SYNC(call);                                            \
-    cudaError err = cudaThreadSynchronize();                                 \
-    if( cudaSuccess != err) {                                                \
-        fprintf(stderr, "Cuda error in file '%s' in line %i .\n",            \
-                __FILE__, __LINE__ );                                        \
-        exit(EXIT_FAILURE);                                                  \
-    } } while (0)
-
-#  define CUFFT_SAFE_CALL( call) do {                                        \
-    cufftResult err = call;                                                  \
-    if( CUFFT_SUCCESS != err) {                                              \
-        fprintf(stderr, "CUFFT error in file '%s' in line %i.\n",            \
-                __FILE__, __LINE__);                                         \
-        exit(EXIT_FAILURE);                                                  \
-    } } while (0)
+#include "common/helper_cuda.h"
+#include "cudaConvFFTData.h"
 
 
-
+const int N_MAX_PARALLEL = 32;
 static bool debug = false;
 
 /*
@@ -146,6 +121,8 @@ int iAlignUp(int a, int b){
 void mexFunction(int nlhs, mxArray *plhs[],
                  int nrhs, mxArray const *prhs[])
 {
+    ConvPlan plan[N_MAX_PARALLEL];
+
     /* Declare all variables.*/
     const mxGPUArray *mxFFTData;
     const mxGPUArray *mxKernel;
@@ -165,6 +142,10 @@ void mexFunction(int nlhs, mxArray *plhs[],
     float *d_Kernel;
     float *d_PaddedKernel;
 
+    /* concurrent kernel executions */
+    int N_GPU; 
+    int N_BATCH_PER_GPU = 4;
+
     char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
 
     /* Choose a reasonably sized number of threads for the block. */
@@ -180,10 +161,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
         CFFT_H, CFFT_W, FFT_H, FFT_W, FEATURE_DIM,
         KERNEL_SIZE, CFFT_SIZE, FFT_SIZE, CONV_SIZE;
 
-    
     /* Initialize the MathWorks GPU API. */
     mxInitGPU();
-
     
     /* Throw an error if the input is not a GPU array. */
     if ( (nrhs < 2) || (nrhs > 3) || !mxIsGPUArray(prhs[0]) )
@@ -200,6 +179,10 @@ void mexFunction(int nlhs, mxArray *plhs[],
         THREAD_PER_BLOCK_2D = (int)threadSize[3];
         if(debug) fprintf(stderr,"Thread size: H=%d, W=%d, D=%d, 2D=%d\n", THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D);
     }
+
+    // cudaDeviceProp dev;
+    // cudaGetDeviceProperties(&dev,0);
+    // int success = checkDeviceProp(dev);
 
     mxFFTData = mxGPUCreateFromMxArray(prhs[0]);
     mxFFT_Dim = mxGPUGetDimensions(mxFFTData);
@@ -229,10 +212,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     if(debug) fprintf(stderr,"N Kernel: %d\n", N_KERNEL);
 
-    /*  Pad Kernel */
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE));
 
+    /* Set block size and thread size */
     dim3 threadBlock3D(THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D);
     dim3 dataBlockGrid3D( iDivUp(FFT_W, threadBlock3D.x), 
                         iDivUp(FFT_H, threadBlock3D.y), 
@@ -243,6 +224,14 @@ void mexFunction(int nlhs, mxArray *plhs[],
                         iDivUp(FFT_H, threadBlock2D.y));
 
 
+    /* Find number of cuda capable devices */
+    checkCudaErrors(cudaGetDeviceCount(&N_GPU));
+    if(debug) fprintf("CUDA-capable device count: %i\n", N_GPU);
+
+
+    /*  Pad Kernel */
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE));
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE));
 
     /* Create a GPUArray to hold the result and get its underlying pointer. */
     // mwSize *FFT_dims = (mwSize *)mxMalloc(2 * sizeof(mwSize));
@@ -415,5 +404,6 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     if(mxKernel == NULL) cudaFree(d_Kernel);
 
+    mxFree(streams);
     mxFree(FFT_dims);
 }

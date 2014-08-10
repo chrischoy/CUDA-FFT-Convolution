@@ -13,7 +13,7 @@ str2num(gpuInfo.ComputeCapability)
   eval(['!rm ' func_name '.o']);
 
   if optimize
-    eval(sprintf('!nvcc -O3 -DNDEBUG -arch=sm_13 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
+    eval(sprintf('!nvcc -O3 -DNDEBUG -arch=sm_13 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -fPIC -v -I./common -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
   else
     eval(sprintf('!nvcc -arch=sm_13 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
   end
