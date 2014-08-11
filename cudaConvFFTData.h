@@ -36,9 +36,9 @@ typedef struct
 
     mxArray *convolutionResult;
     
-    /* cufftComplex is float2 */
     const cufftComplex *d_CFFT_DATA;
     cufftComplex *d_CFFT_KERNEL;
+    cufftComplex *d_FFTEProd;
 
     float *d_CONVOLUTION;
     float *d_IFFTEProd;
