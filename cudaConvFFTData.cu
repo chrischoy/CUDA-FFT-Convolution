@@ -133,6 +133,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     /* cufftComplex is float2 */
     const cufftComplex *d_CFFT_DATA;
     cufftComplex *d_CFFT_KERNEL;
+    cufftComplex *d_FFTEProd;
 
     float *d_CONVOLUTION;
     float *d_IFFTEProd;
@@ -226,7 +227,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     /* Find number of cuda capable devices */
     checkCudaErrors(cudaGetDeviceCount(&N_GPU));
-    if(debug) fprintf("CUDA-capable device count: %i\n", N_GPU);
+    if(debug) fprintf(stderr, "CUDA-capable device count: %i\n", N_GPU);
 
 
     /*  Pad Kernel */
@@ -261,6 +262,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     CUDA_SAFE_CALL(cudaMalloc((void **)&d_CFFT_KERNEL, CFFT_SIZE));
 
+    CUDA_SAFE_CALL(cudaMalloc((void **)&d_FFTEProd, CFFT_SIZE));
 
     /* FFT Kernel */
     int BATCH = FEATURE_DIM;
@@ -354,7 +356,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
         /* Hadamard product, Element-wise multiplication in frequency domain */
         /* If execute the following, second compile of this file create MATLAB error */
         elementwiseProductAndNormalize<<<dataBlockGrid3D, threadBlock3D>>>(
-                d_CFFT_KERNEL, // out
+                d_FFTEProd, // out
                 d_CFFT_DATA, // in data
                 d_CFFT_KERNEL,   // in kernel
                 CFFT_H,
@@ -363,7 +365,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
                 1.0f / (FFT_W * FFT_H)
             );
 
-        CUFFT_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_CFFT_KERNEL, d_IFFTEProd));
+        CUFFT_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_FFTEProd, d_IFFTEProd));
         CUDA_SAFE_CALL(cudaDeviceSynchronize());
 
         sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D>>>(
@@ -401,9 +403,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
     cudaFree(d_IFFTEProd);
     cudaFree(d_CONVOLUTION);
     cudaFree(d_CFFT_KERNEL);
-
+    cudaFree(d_FFTEProd);
+    
     if(mxKernel == NULL) cudaFree(d_Kernel);
 
-    mxFree(streams);
     mxFree(FFT_dims);
 }
