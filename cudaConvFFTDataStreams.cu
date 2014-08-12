@@ -146,9 +146,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
     // const mwSize * mxKernel_Dim;
     const mwSize * mxFFT_Dim;
     // int MblocksPerGrid, NblocksPerGrid;
-    int KERNEL_H, KERNEL_W, MAX_KERNEL_H, MAX_KERNEL_W, N_KERNEL,
+    int KERNEL_H, KERNEL_W, N_KERNEL,
         CFFT_H, CFFT_W, FFT_H, FFT_W, FEATURE_DIM,
-        KERNEL_SIZE, MAX_KERNEL_SIZE, CFFT_SIZE, FFT_SIZE, CONV_SIZE;
+        KERNEL_SIZE, CFFT_SIZE, FFT_SIZE, CONV_SIZE;
 
     int gpuIdx, streamIdx, planIdx;
 
@@ -156,29 +156,20 @@ void mexFunction(int nlhs, mxArray *plhs[],
     mxInitGPU();
     
     /* Throw an error if the input is not a GPU array. */
-    if ( (nrhs < 2) || !mxIsGPUArray(prhs[0]) )
+    if ( (nrhs < 2) || (nrhs > 3) || !mxIsGPUArray(prhs[0]) )
         mexErrMsgIdAndTxt(errId, "The data must be FFT-ed real array in GPU");
 
-    if (( nrhs >= 3)  && mxGetNumberOfElements(prhs[2]) != 4)
+    if (( nrhs == 3)  && mxGetNumberOfElements(prhs[2]) != 4)
         mexErrMsgIdAndTxt(errId, "CUDA Thread Size must be 4 integers : THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D\nYou must choose size such that total thread will not be larger than MaxThreadsPerBlock");
 
-    if ( nrhs >= 3 ){
+    if ( nrhs == 3 ){
         const double* threadSize = (double *)mxGetData(prhs[2]);
         THREAD_PER_BLOCK_H = (int)threadSize[0];
         THREAD_PER_BLOCK_W = (int)threadSize[1];
         THREAD_PER_BLOCK_D = (int)threadSize[2];
         THREAD_PER_BLOCK_2D = (int)threadSize[3];
-        if(debug) printf("Thread size: H=%d, W=%d, D=%d, 2D=%d\n", THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D);
+        if(debug) printf("Thread size: H=%d, W=%d, D=%d, D=%d\n", THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D);
     }
-
-    if ( nrhs >= 4 ){
-        const double* threadSize = (double *)mxGetData(prhs[3]);
-        MAX_KERNEL_H = (int)threadSize[0];
-        MAX_KERNEL_W = (int)threadSize[1];
-        if(debug) printf("Max Kernel size: H=%d, W=%d\n", MAX_KERNEL_H, MAX_KERNEL_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D);
-    }
-
-
 
     cudaDeviceProp dev;
     cudaGetDeviceProperties(&dev,0);
@@ -200,8 +191,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     CFFT_SIZE = CFFT_W * CFFT_H * FEATURE_DIM * sizeof(float2);
     FFT_SIZE  = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float);
     CONV_SIZE = FFT_W  * FFT_H  * sizeof(float);
-    MAX_KERNEL_SIZE = MAX_KERNEL_W * MAX_KERNEL_H * FEATURE_DIM * sizeof(float);
-
+    
     if(debug) printf("FFT Data size: h=%d, w=%d, f=%d\n", FFT_H, FFT_W, FEATURE_DIM);
 
     if (mxGetClassID(prhs[1]) != mxCELL_CLASS)
@@ -324,20 +314,13 @@ void mexFunction(int nlhs, mxArray *plhs[],
             plan[planIdx].d_CFFT_DATA = d_CFFT_DATA_PER_GPU[gpuIdx];
 
             //Allocate memory
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_CFFT_KERNEL,    CFFT_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_FFTEProd,       CFFT_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaMallocHost((void **)&plan[planIdx].h_CONVOLUTION,CONV_SIZE));
-            // CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_CONVOLUTION,    CONV_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaHostGetDevicePointer((void **) &plan[planIdx].d_CONVOLUTION, (void *)plan[planIdx].h_CONVOLUTION, 0));
-
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_IFFTEProd,      FFT_SIZE));
+            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_CFFT_KERNEL, CFFT_SIZE));
+            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_FFTEProd,    CFFT_SIZE));
+            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_CONVOLUTION, CONV_SIZE));
+            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_IFFTEProd,       FFT_SIZE));
             // d_Kernel, dynamically set
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_PaddedKernel,   FFT_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaMallocHost((void **)&plan[planIdx].h_Kernel,     MAX_KERNEL_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaHostGetDevicePointer((void **) &plan[planIdx].d_Kernel, (void *)plan[planIdx].h_Kernel, 0));
-
-            // CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_Kernel,         MAX_KERNEL_SIZE));
-
+            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_PaddedKernel,    FFT_SIZE));
+            // h_Kernel, dynamically set
             // CUDA_SAFE_CALL_NO_SYNC(cudaMallocHost((void **)&plan[planIdx].h_CONVOLUTION,    CONV_SIZE));
         }
     }
@@ -370,7 +353,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
                     if(debug) printf("Start plan %d\n", planIdx);
 
-                    // plan[planIdx].h_Kernel = (float *)mxGetData(mxCurrentCell);
+                    plan[planIdx].h_Kernel = (float *)mxGetData(mxCurrentCell);
                     plan[planIdx].mxKernel_Dim = mxGetDimensions(mxCurrentCell);
 
                     // Kernel dimensions
@@ -379,12 +362,11 @@ void mexFunction(int nlhs, mxArray *plhs[],
                     KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
 
                     if(debug) printf("Start copy\n");
-                    memcpy ( plan[planIdx].h_Kernel, mxGetData(mxCurrentCell), KERNEL_SIZE );
                     // CUDA_SAFE_CALL_NO_SYNC(cudaHostRegister(plan[planIdx].h_Kernel, KERNEL_SIZE, cudaHostRegisterPortable));
                     // CUDA_SAFE_CALL_NO_SYNC(cudaHostGetDevicePointer((void **) &plan[planIdx].d_Kernel, (void *)plan[planIdx].h_Kernel, 0));
-                    // CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_Kernel, KERNEL_SIZE));
+                    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_Kernel, KERNEL_SIZE));
                     // CUDA_SAFE_CALL_NO_SYNC(cudaMemcpyAsync(plan[planIdx].d_Kernel, plan[planIdx].h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice, plan[planIdx].stream));
-                    // CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(plan[planIdx].d_Kernel, plan[planIdx].h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
+                    CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(plan[planIdx].d_Kernel, plan[planIdx].h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
                     mxKernel = NULL;
                 }
 
@@ -394,7 +376,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
                     mexErrMsgIdAndTxt(errId, "Kernel and Data must have the same number of features and kernel size should be smaller than data size");
                 }
 
-                // CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
+                CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
                 if(debug) printf("Sync before padding\n");
                 padData<<<dataBlockGrid3D, threadBlock3D, 0, plan[planIdx].stream>>>(
                     plan[planIdx].d_PaddedKernel,
@@ -426,7 +408,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
                     );
                 if(debug) printf("Eprod done\n");
                 CUFFT_SAFE_CALL(cufftExecC2R(plan[planIdx].FFTplan_C2R, plan[planIdx].d_FFTEProd, plan[planIdx].d_IFFTEProd));
-                // CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
+                CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
                 if(debug) printf("Second fft done\n");
                 sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D, 0, plan[planIdx].stream>>>(
                         plan[planIdx].d_CONVOLUTION,
@@ -438,6 +420,24 @@ void mexFunction(int nlhs, mxArray *plhs[],
                 if(debug) printf("sum along features done\n");
                 // CUDA_SAFE_CALL_NO_SYNC(cudaHostUnregister(plan[planIdx].h_Kernel));
 
+                plan[planIdx].convolutionResult = mxCreateNumericArray(2, FFT_dims, mxSINGLE_CLASS, mxREAL);
+                plan[planIdx].h_CONVOLUTION = (float *)mxGetData(plan[planIdx].convolutionResult);
+
+                // CUDA_SAFE_CALL_NO_SYNC(cudaHostRegister(plan[planIdx].h_CONVOLUTION, CONV_SIZE, cudaHostRegisterPortable));
+                CUDA_SAFE_CALL_NO_SYNC(cudaMemcpyAsync(plan[planIdx].h_CONVOLUTION, plan[planIdx].d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost, plan[planIdx].stream));
+                // CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(plan[planIdx].h_CONVOLUTION, plan[planIdx].d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
+
+                if(debug) printf("Copy done\n");
+ 
+                CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
+                if(debug) printf("Sync done\n");
+
+                mxSetCell(plhs[0], kernelIdx, plan[planIdx].convolutionResult);
+                if(debug) printf("Setting Cell done\n");
+                // if(debug){
+                //     for(int i = 0; i < 10; i++)
+                //         printf("%f\n", plan[planIdx].h_CONVOLUTION[i]);
+                // }
                 kernelIdx = kernelIdx + 1;
                 if (kernelIdx >= N_KERNEL) break;
             }
@@ -457,23 +457,12 @@ void mexFunction(int nlhs, mxArray *plhs[],
                 planIdx = gpuIdx * N_BATCH_PER_GPU + streamIdx;
                 if (planIdx > lastPlanIdx ) break;
 
-                // CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_Kernel));
+                CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_Kernel));
 
                 CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
-                plan[planIdx].convolutionResult = mxCreateNumericArray(2, FFT_dims, mxSINGLE_CLASS, mxREAL);
-                // plan[planIdx].h_CONVOLUTION = (float *)mxGetData(plan[planIdx].convolutionResult);
-                memcpy ( (float *)mxGetData(plan[planIdx].convolutionResult), plan[planIdx].h_CONVOLUTION, CONV_SIZE );
-                // CUDA_SAFE_CALL_NO_SYNC(cudaHostRegister(plan[planIdx].h_CONVOLUTION, CONV_SIZE, cudaHostRegisterPortable));
-                // CUDA_SAFE_CALL_NO_SYNC(cudaMemcpyAsync(plan[planIdx].h_CONVOLUTION, plan[planIdx].d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost, plan[planIdx].stream));
-                // CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(plan[planIdx].h_CONVOLUTION, plan[planIdx].d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
-
-                if(debug) printf("Copy done\n");
- 
-
-                mxSetCell(plhs[0], kernelIdx, plan[planIdx].convolutionResult);
-                if(debug) printf("Setting Cell done\n");
                 // CUDA_SAFE_CALL_NO_SYNC(cudaHostUnregister(plan[planIdx].h_Kernel));
                 // CUDA_SAFE_CALL_NO_SYNC(cudaHostUnregister(plan[planIdx].h_CONVOLUTION));
+                if(debug) printf("Synchronize %d\n", planIdx);
             }
         }
     }
@@ -503,14 +492,10 @@ void mexFunction(int nlhs, mxArray *plhs[],
             cufftDestroy(plan[planIdx].FFTplan_C2R);
 
             //Allocate memory
-            CUDA_SAFE_CALL_NO_SYNC(cudaFreeHost(plan[planIdx].h_Kernel));
-            CUDA_SAFE_CALL_NO_SYNC(cudaFreeHost(plan[planIdx].h_CONVOLUTION));
-
             CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_CFFT_KERNEL));
             CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_FFTEProd));
-            // CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_CONVOLUTION));
+            CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_CONVOLUTION));
             CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_IFFTEProd));
-            // CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_Kernel));
             // d_Kernel
             CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_PaddedKernel));
             // h_Kernel

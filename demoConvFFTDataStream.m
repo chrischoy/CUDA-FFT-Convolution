@@ -52,19 +52,27 @@ end
 cuFFTedData = cudaFFTData(data, cn,cm);
 % b = gpuArray(bmatlab(1:25,:,:));
 
-
 matFFTedKernel = zeros(n + 16, 16, k);
 for i = 1:k
   matFFTedKernel(:,:,i) = fft2(kernel(:,:,i),80,16);
 end
+
+
+matConv = conv2(data(:,:,1),kernel(:,:,1));
+for i = 2:k
+  matConv(:,:,i) = conv2(data(:,:,i),kernel(:,:,i));
+end
+
+cvmatlab = sum(matConv,3);
 
 % Hadammard product
 gpuKernel = gpuArray(single(kernel));
 gpuKernelCell = {gpuKernel};
 kernelCell = {kernel, kernel, kernel};
 % cvcell = cudaConvFFTData(b,gccell);
-% [cvcell] = cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16]);
-a = cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16],[cn, cm]);
+% [cvcell] = cudaConvFFTDataStreamas(cuFFTedData, kernelCell, [8, 8, 8, 16]);
+a = cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16]);
+a{1}
 % k = rand(5);
 % k(:,:,2) = rand(5);
 % [c] = cudaConv(b,single(k))

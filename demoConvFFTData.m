@@ -14,7 +14,7 @@ if ismac
   CUDA_ROOT = '/usr/local/cuda/';
 end
 
-cuda_compile('cudaConvFFTDataStreams',MATLAB_ROOT, CUDA_ROOT, 0)
+cuda_compile('cudaConvFFTData',MATLAB_ROOT, CUDA_ROOT, 0)
 
 clear;
 n = 64;
@@ -61,10 +61,10 @@ end
 % Hadammard product
 gpuKernel = gpuArray(single(kernel));
 gpuKernelCell = {gpuKernel};
-kernelCell = {kernel};
+kernelCell = {kernel, kernel, kernel};
 % cvcell = cudaConvFFTData(b,gccell);
 % [cvcell] = cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16]);
-cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16]);
+[cvcell] = cudaConvFFTData(cuFFTedData, kernelCell, [8, 8, 8, 16]);
 cvg = cvcell{1};
 % cvg = gather(cv);
 % dg = gather(d);

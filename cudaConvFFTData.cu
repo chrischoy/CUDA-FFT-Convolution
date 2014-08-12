@@ -2,7 +2,7 @@
 #include <cufft.h>
 #include "mex.h"
 #include "gpu/mxGPUArray.h"
-#include "common/helper_cuda.h"
+// #include "common/helper_cuda.h"
 #include "cudaConvFFTData.h"
 
 
@@ -226,7 +226,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     /* Find number of cuda capable devices */
-    checkCudaErrors(cudaGetDeviceCount(&N_GPU));
+    CUDA_SAFE_CALL(cudaGetDeviceCount(&N_GPU));
     if(debug) fprintf(stderr, "CUDA-capable device count: %i\n", N_GPU);
 
 
