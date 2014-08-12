@@ -61,36 +61,10 @@ end
 % Hadammard product
 gpuKernel = gpuArray(single(kernel));
 gpuKernelCell = {gpuKernel};
-kernelCell = {kernel};
+kernelCell = {kernel, kernel, kernel};
 % cvcell = cudaConvFFTData(b,gccell);
 % [cvcell] = cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16]);
-cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16]);
-cvg = cvcell{1};
-% cvg = gather(cv);
-% dg = gather(d);
-% figure(1); subplot(121); imagesc(real(matFFTedKernel(:,:,1))); subplot(122); imagesc(real(cuFFTKernel{1}(:,:,1)));
-
-matConv = conv2(data(:,:,1),kernel(:,:,1));
-for i = 2:k
-  matConv(:,:,i) = conv2(data(:,:,i),kernel(:,:,i));
-end
-
-cvmatlab = sum(matConv,3);
-
-ematlab = matFFTedKernel .* (matFFTedData);
-matFFTConv = ifft2(ematlab(:,:,1));
-matFFTConv(:,:,2) = ifft2(ematlab(:,:,2));
-
-
-% dgc = [dg; conj([dg(end-1:-1:2, 1,:) dg(end-1:-1:2, end:-1:2,:)])];
-% figure(1); subplot(121); imagesc(real(dmatlab(:,:,1))); subplot(122); imagesc(real(dgc(:,:,1)));
-
-figure(3); subplot(131); imagesc(matConv(:,:,1)); subplot(132); imagesc(real(matFFTConv(:,:,1)));
-figure(4); subplot(121); subplot(122); imagesc(real(ematlab(:,:,1)))
-figure(5); subplot(121); imagesc(real(ematlab(:,:,1)));
-figure(6); subplot(131); imagesc(cvg); colorbar; subplot(132); imagesc(cvg(1:n + cn - 1,1:m + cm - 1)); colorbar; subplot(133); imagesc(cvmatlab); colorbar;
-figure(7); imagesc(cvg(1:n + cn - 1,1:m + cm - 1) - cvmatlab); colorbar;
-
+a = cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16],[cn, cm]);
 % k = rand(5);
 % k(:,:,2) = rand(5);
 % [c] = cudaConv(b,single(k))
