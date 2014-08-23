@@ -29,31 +29,20 @@
     } } while (0)
 
 
-typedef struct
-{
-    /* Concurrency parameters */
-    int GPU_IDX, STREAM_IDX;
-    cufftHandle FFTplan_R2C, FFTplan_C2R;
-    const cufftComplex *d_CFFT_DATA;
+////////////////////////////////////////////////////////////////////////////////
+// Helper functions
+////////////////////////////////////////////////////////////////////////////////
+//Round a / b to nearest higher integer value
+int iDivUp(int a, int b){
+    return (a % b != 0) ? (a / b + 1) : (a / b);
+}
 
-    mxArray *convolutionResult;
+//Align a to nearest higher multiple of b
+int iAlignUp(int a, int b){
+    return (a % b != 0) ?  (a - a % b + b) : a;
+}
 
-    cufftComplex *d_CFFT_KERNEL;
-    cufftComplex *d_FFTEProd;
-    float *d_CONVOLUTION;
-    float *d_IFFTEProd;
-    float *d_Kernel;
-    float *d_PaddedKernel;
 
-    float *h_Kernel;
-    float *h_CONVOLUTION;
-
-    const mwSize *mxKernel_Dim;
-
-    //Stream for asynchronous command execution
-    cudaStream_t stream;
-
-} ConvPlan;
 
 int checkDeviceProp ( cudaDeviceProp p ) {
     int support = p.canMapHostMemory;

@@ -3,7 +3,7 @@
 #include "mex.h"
 #include "gpu/mxGPUArray.h"
 // #include "common/helper_cuda.h"
-#include "cudaConvFFTData.h"
+#include "cudaConvFFTDataStream.h"
 
 
 const int N_MAX_PARALLEL = 32;

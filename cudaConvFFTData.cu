@@ -4,116 +4,21 @@
 #include "gpu/mxGPUArray.h"
 // #include "common/helper_cuda.h"
 #include "cudaConvFFTData.h"
+#include "cudaConvFFTData.cuh"
 
 
 const int N_MAX_PARALLEL = 32;
 static bool debug = false;
 
-/*
- * Device Code
- */
+enum OUT_INDEX{
+    CONVOLUTION_CELL_INDEX
+};
 
-////////////////////////////////////////////////////////////////////////////////
-// Pad data with zeros, 
-////////////////////////////////////////////////////////////////////////////////
-__global__ void padData(
-    float *d_PaddedData,
-    const float *d_Data,
-    int fftW,
-    int fftH,
-    int dataW,
-    int dataH,
-    int FEATURE_DIM
-){
-    const int x = IMUL(blockDim.x, blockIdx.x) + threadIdx.x;
-    const int y = IMUL(blockDim.y, blockIdx.y) + threadIdx.y;
-    const int z = IMUL(blockDim.z, blockIdx.z) + threadIdx.z;
-
-    if(x < fftW && y < fftH && z < FEATURE_DIM){
-        if(x < dataW && y < dataH)
-            d_PaddedData[IMUL(z, IMUL(fftW, fftH)) + IMUL(x, fftH) + y] = 
-                    d_Data[ IMUL(z, IMUL(dataH, dataW)) + IMUL(x, dataH ) + y];
-        else
-            d_PaddedData[IMUL(z, IMUL(fftW, fftH)) + IMUL(x, fftH) + y] = 0;
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Modulate Fourier image of padded data by Fourier image of padded kernel
-// and normalize by FFT size
-////////////////////////////////////////////////////////////////////////////////
-__device__ void complexMulAndScale(cufftComplex &out, cufftComplex a, cufftComplex b, float c){
-    const cufftComplex t = {c * (a.x * b.x - a.y * b.y), c * (a.y * b.x + a.x * b.y)};
-    out = t;
-}
-
-__device__ void complexConjMulAndScale(cufftComplex &out, cufftComplex a, cufftComplex b, float c){
-    const cufftComplex t = {c * (a.x * b.x + a.y * b.y), c * (a.y * b.x - a.x * b.y)};
-    out = t;
-}
-
-__global__ void elementwiseProductAndNormalize(
-    cufftComplex *fft_Output,
-    const cufftComplex *fft_PaddedData,
-    const cufftComplex *fft_PaddedKernel,
-    int FFT_H,
-    int FFT_W,
-    int FEATURE_DIM,
-    float scale
-){
-    const int x = IMUL(blockDim.x, blockIdx.x) + threadIdx.x;
-    const int y = IMUL(blockDim.y, blockIdx.y) + threadIdx.y;
-    const int z = IMUL(blockDim.z, blockIdx.z) + threadIdx.z;
-    
-    if(x < FFT_W && y < FFT_H && z < FEATURE_DIM){
-        // int i = IMUL(z, IMUL(FFT_W, FFT_H)) + IMUL(FFT_H, x) + y;
-        int i = z * FFT_W * FFT_H + FFT_H * x + y;
-        // complexConjMulAndScale(fft_Output[i], fft_PaddedData[i], fft_PaddedKernel[i], scale);
-        fft_Output[i].x = scale * (fft_PaddedData[i].x * fft_PaddedKernel[i].x - fft_PaddedData[i].y * fft_PaddedKernel[i].y);
-        fft_Output[i].y = scale * (fft_PaddedData[i].y * fft_PaddedKernel[i].x + fft_PaddedData[i].x * fft_PaddedKernel[i].y);
-    }
-}
-
-/* Support in-place computation, i.e. input and output can be the same */
-__global__ void sumAlongFeatures(
-    float *convolutionResult,
-    const float *convolutionPerFeature,
-    int FFT_H,
-    int FFT_W,
-    int FEATURE_DIM
-){
-    const int x = IMUL(blockDim.x, blockIdx.x) + threadIdx.x;
-    const int y = IMUL(blockDim.y, blockIdx.y) + threadIdx.y;
-
-    if(x < FFT_W && y < FFT_H){
-        const int result_i = IMUL(FFT_H, x) + y;
-        const int N = IMUL(FFT_W, FFT_H);
-
-        convolutionResult[result_i] = convolutionPerFeature[result_i];
-        for (int z = 1; z < FEATURE_DIM; z++){
-            convolutionResult[result_i] += 
-                convolutionPerFeature[IMUL(z, N) + result_i];
-        }
-    }
-}
-
-/*
- * Host code
- */
-
-////////////////////////////////////////////////////////////////////////////////
-// Helper functions
-////////////////////////////////////////////////////////////////////////////////
-//Round a / b to nearest higher integer value
-int iDivUp(int a, int b){
-    return (a % b != 0) ? (a / b + 1) : (a / b);
-}
-
-//Align a to nearest higher multiple of b
-int iAlignUp(int a, int b){
-    return (a % b != 0) ?  (a - a % b + b) : a;
-}
-
+enum IN_INDEX{
+    FFT_DATA_INDEX,
+    KERNLE_CELL_INDEX,
+    THREAD_SIZE_INDEX // Optional
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Mex Entry
@@ -121,8 +26,6 @@ int iAlignUp(int a, int b){
 void mexFunction(int nlhs, mxArray *plhs[],
                  int nrhs, mxArray const *prhs[])
 {
-    ConvPlan plan[N_MAX_PARALLEL];
-
     /* Declare all variables.*/
     const mxGPUArray *mxFFTData;
     const mxGPUArray *mxKernel;
@@ -143,10 +46,6 @@ void mexFunction(int nlhs, mxArray *plhs[],
     float *d_Kernel;
     float *d_PaddedKernel;
 
-    /* concurrent kernel executions */
-    int N_GPU; 
-    int N_BATCH_PER_GPU = 4;
-
     char const * const errId = "cudaConvFFTData:InvalidInput";
 
     /* Choose a reasonably sized number of threads for the block. */
@@ -163,17 +62,19 @@ void mexFunction(int nlhs, mxArray *plhs[],
         KERNEL_SIZE, CFFT_SIZE, FFT_SIZE, CONV_SIZE;
 
     /* Initialize the MathWorks GPU API. */
-    mxInitGPU();
+    // If initialized mxInitGPU do nothing
+    if (mxInitGPU() != MX_GPU_SUCCESS)
+        mexErrMsgTxt("mxInitGPU fail");
     
     /* Throw an error if the input is not a GPU array. */
-    if ( (nrhs < 2) || (nrhs > 3) || !mxIsGPUArray(prhs[0]) )
+    if ( (nrhs < 2) || (nrhs > 3) || !mxIsGPUArray(prhs[FFT_DATA_INDEX]) )
         mexErrMsgIdAndTxt(errId, "The data must be FFT-ed real array in GPU");
 
-    if (( nrhs == 3)  && mxGetNumberOfElements(prhs[2]) != 4)
+    if (( nrhs == 3)  && mxGetNumberOfElements(prhs[THREAD_SIZE_INDEX]) != 4)
         mexErrMsgIdAndTxt(errId, "CUDA Thread Size must be 4 integers : THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D\nYou must choose size such that total thread will not be larger than MaxThreadsPerBlock");
 
     if ( nrhs == 3 ){
-        const double* threadSize = (double *)mxGetData(prhs[2]);
+        const double* threadSize = (double *)mxGetData(prhs[THREAD_SIZE_INDEX]);
         THREAD_PER_BLOCK_H = (int)threadSize[0];
         THREAD_PER_BLOCK_W = (int)threadSize[1];
         THREAD_PER_BLOCK_D = (int)threadSize[2];
@@ -185,7 +86,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     // cudaGetDeviceProperties(&dev,0);
     // int success = checkDeviceProp(dev);
 
-    mxFFTData = mxGPUCreateFromMxArray(prhs[0]);
+    mxFFTData = mxGPUCreateFromMxArray(prhs[FFT_DATA_INDEX]);
     mxFFT_Dim = mxGPUGetDimensions(mxFFTData);
 
     // FFT Dim
@@ -204,12 +105,12 @@ void mexFunction(int nlhs, mxArray *plhs[],
     
     if(debug) fprintf(stderr,"FFT Data size: h=%d, w=%d, f=%d\n", FFT_H, FFT_W, FEATURE_DIM);
 
-    if (mxGetClassID(prhs[1]) != mxCELL_CLASS)
+    if (mxGetClassID(prhs[KERNLE_CELL_INDEX]) != mxCELL_CLASS)
         mexErrMsgIdAndTxt(errId, "Kernel must be a cell array");
 
-    mwSize nKernel = mxGetNumberOfElements(prhs[1]);
+    mwSize nKernel = mxGetNumberOfElements(prhs[KERNLE_CELL_INDEX]);
     N_KERNEL = (int)nKernel;
-    plhs[0] = mxCreateCellMatrix(1, N_KERNEL);
+    plhs[CONVOLUTION_CELL_INDEX] = mxCreateCellMatrix(1, N_KERNEL);
 
     if(debug) fprintf(stderr,"N Kernel: %d\n", N_KERNEL);
 
@@ -225,14 +126,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
                         iDivUp(FFT_H, threadBlock2D.y));
 
 
-    /* Find number of cuda capable devices */
-    CUDA_SAFE_CALL(cudaGetDeviceCount(&N_GPU));
-    if(debug) fprintf(stderr, "CUDA-capable device count: %i\n", N_GPU);
-
-
     /*  Pad Kernel */
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE));
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE));
+    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE));
+    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE));
 
     /* Create a GPUArray to hold the result and get its underlying pointer. */
     // mwSize *FFT_dims = (mwSize *)mxMalloc(2 * sizeof(mwSize));
@@ -250,7 +146,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     // d_CONVOLUTION = (cufftReal *)(mxGPUGetData(mxConvolution));
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_CONVOLUTION, CONV_SIZE));
+    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_CONVOLUTION, CONV_SIZE));
 
     // mxFFTKernel = mxGPUCreateGPUArray(3,
     //                         mxFFT_Dim,
@@ -260,9 +156,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     // d_CFFT_KERNEL = (cufftComplex *)(mxGPUGetData(mxFFTKernel));
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_CFFT_KERNEL, CFFT_SIZE));
+    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_CFFT_KERNEL, CFFT_SIZE));
 
-    CUDA_SAFE_CALL(cudaMalloc((void **)&d_FFTEProd, CFFT_SIZE));
+    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_FFTEProd, CFFT_SIZE));
 
     /* FFT Kernel */
     int BATCH = FEATURE_DIM;
@@ -297,7 +193,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     for (int kernelIdx = 0; kernelIdx < N_KERNEL; kernelIdx++){
         
         // Get Kernel Data
-        const mxArray *mxCurrentCell = mxGetCell(prhs[1], kernelIdx);
+        const mxArray *mxCurrentCell = mxGetCell(prhs[KERNLE_CELL_INDEX], kernelIdx);
         if (!mxIsGPUArray(mxCurrentCell)){
             
             if( mxGetClassID(mxCurrentCell) != mxSINGLE_CLASS || mxGetNumberOfDimensions(mxCurrentCell) != 3 )
@@ -311,8 +207,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
             KERNEL_W = mxKernel_Dim[1];
             KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
 
-            CUDA_SAFE_CALL(cudaMalloc((void **)&d_Kernel, KERNEL_SIZE));
-            CUDA_SAFE_CALL(cudaMemcpy(d_Kernel, h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
+            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_Kernel, KERNEL_SIZE));
+            CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(d_Kernel, h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
             mxKernel = NULL;
         }else{ // Kernel is GPU Array
             mxKernel = mxGPUCreateFromMxArray(mxCurrentCell);
@@ -348,7 +244,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
         CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedKernel, d_CFFT_KERNEL));
-        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+        CUDA_SAFE_CALL_NO_SYNC(cudaDeviceSynchronize());
 
         if(debug) fprintf(stderr,"FFT done\n");
 
@@ -366,7 +262,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
             );
 
         CUFFT_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_FFTEProd, d_IFFTEProd));
-        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+        CUDA_SAFE_CALL_NO_SYNC(cudaDeviceSynchronize());
 
         sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D>>>(
                 d_CONVOLUTION,
@@ -380,9 +276,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
         convolutionResult = mxCreateNumericArray(2, FFT_dims, mxSINGLE_CLASS, mxREAL);
         h_CONVOLUTION = (float *)mxGetData(convolutionResult);
-        CUDA_SAFE_CALL(cudaMemcpy(h_CONVOLUTION, d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(h_CONVOLUTION, d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
 
-        mxSetCell(plhs[0], kernelIdx, convolutionResult);
+        mxSetCell(plhs[CONVOLUTION_CELL_INDEX], kernelIdx, convolutionResult);
     }
     // plhs[1] = mxGPUCreateMxArrayOnGPU(mxFFTKernel);
 
