@@ -7,14 +7,17 @@ reset(g);
 cos(gpuArray(1));
 
 MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
-CUDA_ROOT = '/usr/local/cuda-5.5/';
+CUDA_ROOT = '/usr/local/cuda-6.0/';
+
+% ld = getenv('LD_LIBRARY_PATH');
+% setenv('LD_LIBRARY_PATH',[ld ':/usr/local/cuda-5.5/']);
 
 if ismac
   MATLAB_ROOT = '/Applications/MATLAB_R2014a.app/';
   CUDA_ROOT = '/usr/local/cuda/';
 end
 
-cuda_compile('cudaConvFFTData',MATLAB_ROOT, CUDA_ROOT, 0)
+cuda_compile('cudaConvFFTData',MATLAB_ROOT, CUDA_ROOT, 1)
 
 clear;
 n = 64;

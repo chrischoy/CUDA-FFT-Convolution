@@ -133,7 +133,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     /* concurrent kernel executions */
     int N_GPU; 
-    int N_BATCH_PER_GPU = 3;
+    int N_BATCH_PER_GPU = 2;
 
     char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
 
@@ -216,14 +216,15 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     /* Find number of cuda capable devices */
-    CUDA_SAFE_CALL_NO_SYNC(cudaGetDeviceCount(&N_GPU));
+    CUDA_SAFE_CALL(cudaGetDeviceCount(&N_GPU));
     if(debug) printf( "CUDA-capable device count: %i\n", N_GPU);
     
+    CUDA_SAFE_CALL(cudaSetDevice(0));
     d_CFFT_DATA_PER_GPU = (cufftComplex **)malloc(N_GPU * sizeof(float));
 
     /*  Pad Kernel */
-    // CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE));
-    // CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE));
+    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_PaddedKernel,    FFT_SIZE));
+    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_IFFTEProd,       FFT_SIZE));
 
     /* Create a GPUArray to hold the result and get its underlying pointer. */
     mwSize *FFT_dims = (mwSize *)mxMalloc(2 * sizeof(mwSize));
@@ -241,7 +242,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     // d_CONVOLUTION = (cufftReal *)(mxGPUGetData(mxConvolution));
 
-    // CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_CONVOLUTION, CONV_SIZE));
+    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_CONVOLUTION, CONV_SIZE));
 
     // mxFFTKernel = mxGPUCreateGPUArray(3,
     //                         mxFFT_Dim,
@@ -251,9 +252,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     // d_CFFT_KERNEL = (cufftComplex *)(mxGPUGetData(mxFFTKernel));
 
-    // CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_CFFT_KERNEL, CFFT_SIZE));
+    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_CFFT_KERNEL, CFFT_SIZE));
 
-    // CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_FFTEProd, CFFT_SIZE));
+    // CUDA_SAFE_CALL(cudaMalloc((void **)&d_FFTEProd, CFFT_SIZE));
 
     /* FFT Kernel */
     int BATCH = FEATURE_DIM;
@@ -267,30 +268,31 @@ void mexFunction(int nlhs, mxArray *plhs[],
     //     FFT_dims[0] = FFT_H;
     //     FFT_dims[1] = FFT_W;
 
-
+    N_GPU = 1;
     //Create streams for issuing GPU command asynchronously and allocate memory (GPU and System page-locked)
     for (gpuIdx = 0; gpuIdx < N_GPU; gpuIdx++)
     {
         // Set GPU
-        CUDA_SAFE_CALL_NO_SYNC(cudaSetDevice(gpuIdx));
-        // if (gpuIdx != 0) CUDA_SAFE_CALL_NO_SYNC();
+        CUDA_SAFE_CALL(cudaSetDevice(gpuIdx));
+        // if (gpuIdx != 0) CUDA_SAFE_CALL();
         /* COPY mxFFTData to individual GPU */
-        if (gpuIdx != 0) {
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_CFFT_DATA_PER_GPU[gpuIdx], CFFT_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaMemcpyPeerAsync(d_CFFT_DATA_PER_GPU[gpuIdx],
+        if (gpuIdx > 0) {
+            if(debug) printf("start inter gpu copy from 0 to %d\n", gpuIdx);
+            CUDA_SAFE_CALL(cudaMalloc((void **)&d_CFFT_DATA_PER_GPU[gpuIdx], CFFT_SIZE));
+            CUDA_SAFE_CALL(cudaMemcpyPeerAsync(d_CFFT_DATA_PER_GPU[gpuIdx],
                     gpuIdx,
                     d_CFFT_DATA_PER_GPU[0],
                     0,
                     CFFT_SIZE,
-                    plan[gpuIdx * N_BATCH_PER_GPU].stream
-                    ));
-
+                    plan[0].stream));
+            if(debug) printf("end gpu copy from 0 to %d\n", gpuIdx);
         }
 
         // Set Streams
         for (streamIdx = 0; streamIdx < N_BATCH_PER_GPU; streamIdx++){
             planIdx = gpuIdx * N_BATCH_PER_GPU + streamIdx;
-            CUDA_SAFE_CALL_NO_SYNC(cudaStreamCreate(&plan[planIdx].stream));
+
+            CUDA_SAFE_CALL(cudaStreamCreate(&plan[planIdx].stream));
             
             // Cufft Plans
             CUFFT_SAFE_CALL(cufftPlanMany(&plan[planIdx].FFTplan_R2C, 
@@ -314,14 +316,14 @@ void mexFunction(int nlhs, mxArray *plhs[],
             plan[planIdx].d_CFFT_DATA = d_CFFT_DATA_PER_GPU[gpuIdx];
 
             //Allocate memory
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_CFFT_KERNEL, CFFT_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_FFTEProd,    CFFT_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_CONVOLUTION, CONV_SIZE));
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_IFFTEProd,       FFT_SIZE));
+            CUDA_SAFE_CALL(cudaMalloc((void **)&plan[planIdx].d_CFFT_KERNEL, CFFT_SIZE));
+            CUDA_SAFE_CALL(cudaMalloc((void **)&plan[planIdx].d_FFTEProd,    CFFT_SIZE));
+            CUDA_SAFE_CALL(cudaMalloc((void **)&plan[planIdx].d_CONVOLUTION, CONV_SIZE));
+            CUDA_SAFE_CALL(cudaMalloc((void **)&plan[planIdx].d_IFFTEProd,       FFT_SIZE));
             // d_Kernel, dynamically set
-            CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_PaddedKernel,    FFT_SIZE));
+            CUDA_SAFE_CALL(cudaMalloc((void **)&plan[planIdx].d_PaddedKernel,    FFT_SIZE));
             // h_Kernel, dynamically set
-            // CUDA_SAFE_CALL_NO_SYNC(cudaMallocHost((void **)&plan[planIdx].h_CONVOLUTION,    CONV_SIZE));
+            // CUDA_SAFE_CALL(cudaMallocHost((void **)&plan[planIdx].h_CONVOLUTION,    CONV_SIZE));
         }
     }
     
@@ -332,6 +334,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     int kernelIdx = 0;
     int lastPlanIdx;
+
     while(kernelIdx < N_KERNEL){
         if(debug) printf( "Kernel: %d\n",kernelIdx);
 
@@ -339,7 +342,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
             if (kernelIdx >= N_KERNEL) break;
 
             // Set GPU
-            CUDA_SAFE_CALL_NO_SYNC(cudaSetDevice(gpuIdx));
+            CUDA_SAFE_CALL(cudaSetDevice(gpuIdx));
             
             // Set Streams
             for (streamIdx = 0; streamIdx < N_BATCH_PER_GPU; streamIdx++){
@@ -362,11 +365,11 @@ void mexFunction(int nlhs, mxArray *plhs[],
                     KERNEL_SIZE = KERNEL_W * KERNEL_H * FEATURE_DIM * sizeof(float);
 
                     if(debug) printf("Start copy\n");
-                    // CUDA_SAFE_CALL_NO_SYNC(cudaHostRegister(plan[planIdx].h_Kernel, KERNEL_SIZE, cudaHostRegisterPortable));
-                    // CUDA_SAFE_CALL_NO_SYNC(cudaHostGetDevicePointer((void **) &plan[planIdx].d_Kernel, (void *)plan[planIdx].h_Kernel, 0));
-                    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&plan[planIdx].d_Kernel, KERNEL_SIZE));
-                    // CUDA_SAFE_CALL_NO_SYNC(cudaMemcpyAsync(plan[planIdx].d_Kernel, plan[planIdx].h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice, plan[planIdx].stream));
-                    CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(plan[planIdx].d_Kernel, plan[planIdx].h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
+                    // CUDA_SAFE_CALL(cudaHostRegister(plan[planIdx].h_Kernel, KERNEL_SIZE, cudaHostRegisterPortable));
+                    // CUDA_SAFE_CALL(cudaHostGetDevicePointer((void **) &plan[planIdx].d_Kernel, (void *)plan[planIdx].h_Kernel, 0));
+                    CUDA_SAFE_CALL(cudaMalloc((void **)&plan[planIdx].d_Kernel, KERNEL_SIZE));
+                    CUDA_SAFE_CALL(cudaMemcpyAsync(plan[planIdx].d_Kernel, plan[planIdx].h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice, plan[planIdx].stream));
+                    // CUDA_SAFE_CALL(cudaMemcpy(plan[planIdx].d_Kernel, plan[planIdx].h_Kernel, KERNEL_SIZE, cudaMemcpyHostToDevice));
                     mxKernel = NULL;
                 }
 
@@ -376,7 +379,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
                     mexErrMsgIdAndTxt(errId, "Kernel and Data must have the same number of features and kernel size should be smaller than data size");
                 }
 
-                CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
+                // CUDA_SAFE_CALL(cudaStreamSynchronize(plan[planIdx].stream));
                 if(debug) printf("Sync before padding\n");
                 padData<<<dataBlockGrid3D, threadBlock3D, 0, plan[planIdx].stream>>>(
                     plan[planIdx].d_PaddedKernel,
@@ -389,9 +392,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
                     );
                 if(debug) printf("Padding done\n");
 
-
+                CUDA_SAFE_CALL(cudaStreamSynchronize(plan[planIdx].stream));
                 CUFFT_SAFE_CALL(cufftExecR2C(plan[planIdx].FFTplan_R2C, plan[planIdx].d_PaddedKernel, plan[planIdx].d_CFFT_KERNEL));
-                // CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
+                // CUDA_SAFE_CALL(cudaStreamSynchronize(plan[planIdx].stream));
 
                 if(debug) printf("FFT done\n");
                 
@@ -408,7 +411,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
                     );
                 if(debug) printf("Eprod done\n");
                 CUFFT_SAFE_CALL(cufftExecC2R(plan[planIdx].FFTplan_C2R, plan[planIdx].d_FFTEProd, plan[planIdx].d_IFFTEProd));
-                CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
+                // CUDA_SAFE_CALL(cudaStreamSynchronize(plan[planIdx].stream));
                 if(debug) printf("Second fft done\n");
                 sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D, 0, plan[planIdx].stream>>>(
                         plan[planIdx].d_CONVOLUTION,
@@ -418,18 +421,18 @@ void mexFunction(int nlhs, mxArray *plhs[],
                         FEATURE_DIM
                     );
                 if(debug) printf("sum along features done\n");
-                // CUDA_SAFE_CALL_NO_SYNC(cudaHostUnregister(plan[planIdx].h_Kernel));
+                // CUDA_SAFE_CALL(cudaHostUnregister(plan[planIdx].h_Kernel));
 
                 plan[planIdx].convolutionResult = mxCreateNumericArray(2, FFT_dims, mxSINGLE_CLASS, mxREAL);
                 plan[planIdx].h_CONVOLUTION = (float *)mxGetData(plan[planIdx].convolutionResult);
 
-                // CUDA_SAFE_CALL_NO_SYNC(cudaHostRegister(plan[planIdx].h_CONVOLUTION, CONV_SIZE, cudaHostRegisterPortable));
-                CUDA_SAFE_CALL_NO_SYNC(cudaMemcpyAsync(plan[planIdx].h_CONVOLUTION, plan[planIdx].d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost, plan[planIdx].stream));
-                // CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(plan[planIdx].h_CONVOLUTION, plan[planIdx].d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
+                // CUDA_SAFE_CALL(cudaHostRegister(plan[planIdx].h_CONVOLUTION, CONV_SIZE, cudaHostRegisterPortable));
+                CUDA_SAFE_CALL(cudaMemcpyAsync(plan[planIdx].h_CONVOLUTION, plan[planIdx].d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost, plan[planIdx].stream));
+                // CUDA_SAFE_CALL(cudaMemcpy(plan[planIdx].h_CONVOLUTION, plan[planIdx].d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
 
                 if(debug) printf("Copy done\n");
  
-                CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
+                // CUDA_SAFE_CALL(cudaStreamSynchronize(plan[planIdx].stream));
                 if(debug) printf("Sync done\n");
 
                 mxSetCell(plhs[0], kernelIdx, plan[planIdx].convolutionResult);
@@ -450,18 +453,16 @@ void mexFunction(int nlhs, mxArray *plhs[],
             if (planIdx > lastPlanIdx ) break;
 
             // Set GPU
-            CUDA_SAFE_CALL_NO_SYNC(cudaSetDevice(gpuIdx));
+            CUDA_SAFE_CALL(cudaSetDevice(gpuIdx));
             
             // Set Streams
             for (streamIdx = 0; streamIdx < N_BATCH_PER_GPU; streamIdx++){
                 planIdx = gpuIdx * N_BATCH_PER_GPU + streamIdx;
                 if (planIdx > lastPlanIdx ) break;
-
-                CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_Kernel));
-
-                CUDA_SAFE_CALL_NO_SYNC(cudaStreamSynchronize(plan[planIdx].stream));
-                // CUDA_SAFE_CALL_NO_SYNC(cudaHostUnregister(plan[planIdx].h_Kernel));
-                // CUDA_SAFE_CALL_NO_SYNC(cudaHostUnregister(plan[planIdx].h_CONVOLUTION));
+                CUDA_SAFE_CALL(cudaStreamSynchronize(plan[planIdx].stream));
+                CUDA_SAFE_CALL(cudaFree(plan[planIdx].d_Kernel));
+                // CUDA_SAFE_CALL(cudaHostUnregister(plan[planIdx].h_Kernel));
+                // CUDA_SAFE_CALL(cudaHostUnregister(plan[planIdx].h_CONVOLUTION));
                 if(debug) printf("Synchronize %d\n", planIdx);
             }
         }
@@ -482,8 +483,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
     for ( gpuIdx = 0; gpuIdx < N_GPU; gpuIdx++)
     {
         // Set GPU
-        CUDA_SAFE_CALL_NO_SYNC(cudaSetDevice(gpuIdx));
-
+        CUDA_SAFE_CALL(cudaSetDevice(gpuIdx));
+        if(debug) printf( "free DATA per GPU %d\n", gpuIdx);
+        CUDA_SAFE_CALL(cudaFree(d_CFFT_DATA_PER_GPU[gpuIdx]));
         // Set Streams
         for (int streamIdx = 0; streamIdx < N_BATCH_PER_GPU; streamIdx++){
             int planIdx = gpuIdx * N_BATCH_PER_GPU + streamIdx;
@@ -491,17 +493,19 @@ void mexFunction(int nlhs, mxArray *plhs[],
             cufftDestroy(plan[planIdx].FFTplan_R2C);
             cufftDestroy(plan[planIdx].FFTplan_C2R);
 
-            //Allocate memory
-            CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_CFFT_KERNEL));
-            CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_FFTEProd));
-            CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_CONVOLUTION));
-            CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_IFFTEProd));
-            // d_Kernel
-            CUDA_SAFE_CALL_NO_SYNC(cudaFree(plan[planIdx].d_PaddedKernel));
-            // h_Kernel
-            // CUDA_SAFE_CALL_NO_SYNC(cudaFreeHost(plan[planIdx].h_CONVOLUTION));
+            if(debug) printf( "free plans\n");
 
-            CUDA_SAFE_CALL_NO_SYNC(cudaStreamDestroy(plan[planIdx].stream));
+            //Allocate memory
+            CUDA_SAFE_CALL(cudaFree(plan[planIdx].d_CFFT_KERNEL));
+            CUDA_SAFE_CALL(cudaFree(plan[planIdx].d_FFTEProd));
+            CUDA_SAFE_CALL(cudaFree(plan[planIdx].d_CONVOLUTION));
+            CUDA_SAFE_CALL(cudaFree(plan[planIdx].d_IFFTEProd));
+            // d_Kernel
+            CUDA_SAFE_CALL(cudaFree(plan[planIdx].d_PaddedKernel));
+            // h_Kernel
+            // CUDA_SAFE_CALL(cudaFreeHost(plan[planIdx].h_CONVOLUTION));
+            if(debug) printf( "free stream\n");
+            CUDA_SAFE_CALL(cudaStreamDestroy(plan[planIdx].stream));
         }
 
         // cudaDeviceReset causes the driver to clean up all state. While

@@ -147,7 +147,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     int N_GPU; 
     int N_BATCH_PER_GPU = 4;
 
-    char const * const errId = "parallel:gpu:mexGPUExample:InvalidInput";
+    char const * const errId = "cudaConvFFTData:InvalidInput";
 
     /* Choose a reasonably sized number of threads for the block. */
     int THREAD_PER_BLOCK_H = 16;

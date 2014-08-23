@@ -17,14 +17,17 @@ str2num(gpuInfo.ComputeCapability)
   end
   
   if optimize
-    eval(sprintf('!nvcc -O3 -DNDEBUG -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -fPIC -v -I./common -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
+    eval(sprintf('!%s/bin/nvcc -O3 -DNDEBUG -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -fPIC -v -I./common -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu',cudaroot, matlabroot, matlabroot, func_name));
   else
-    eval(sprintf('!nvcc -g -G -O0 -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', matlabroot, matlabroot, func_name));
+    eval(sprintf('!%s/bin/nvcc -g -G -O0 -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', cudaroot, matlabroot, matlabroot, func_name));
   end
   if ismac
     eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' matlabroot '/bin/maci64  -lcudart -lcufft -lmwgpu']);  
   else
-    eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' cudaroot '/lib64 -lcudart -lcufft -L' matlabroot '/bin/glnxa64 -lmwgpu']);  
+    lp = getenv('LIBRARY_PATH');
+    setenv('LIBRARY_PATH', [lp ':' matlabroot '/bin/glnxa64']);
+    eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' matlabroot '/bin/glnxa64 -lcudart -lcufft -lmwgpu']);    
+    %eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' cudaroot '/lib64 -lcudart -lcufft -L' matlabroot '/bin/glnxa64 -lmwgpu']);  
   end
 end
   

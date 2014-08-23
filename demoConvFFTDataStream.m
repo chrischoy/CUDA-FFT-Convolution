@@ -1,14 +1,17 @@
 % demo
 clear;
-g = gpuDevice(1);
+g = gpuDevice(2);
 reset(g);
 
 % matlab gpu dynamic library will be loaded.
 cos(gpuArray(1));
 
-MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
+% MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
+MATLAB_ROOT = '/usr/local/MATLAB/R2014a/';
 CUDA_ROOT = '/usr/local/cuda-5.5/';
 
+% ldlib = getenv('LD_LIBRARY_PATH');
+% setenv('LD_LIBRARY_PATH',[ldlib ':/usr/local/cuda-6.0/lib64/']);
 if ismac
   MATLAB_ROOT = '/Applications/MATLAB_R2014a.app/';
   CUDA_ROOT = '/usr/local/cuda/';
@@ -16,10 +19,9 @@ end
 
 cuda_compile('cudaConvFFTDataStreams',MATLAB_ROOT, CUDA_ROOT, 0)
 
-clear;
 n = 64;
 m = 8;
-k = 5;
+k = 2;
 
 cn = 3;
 cm = 3;
@@ -57,7 +59,6 @@ for i = 1:k
   matFFTedKernel(:,:,i) = fft2(kernel(:,:,i),80,16);
 end
 
-
 matConv = conv2(data(:,:,1),kernel(:,:,1));
 for i = 2:k
   matConv(:,:,i) = conv2(data(:,:,i),kernel(:,:,i));
@@ -68,11 +69,12 @@ cvmatlab = sum(matConv,3);
 % Hadammard product
 gpuKernel = gpuArray(single(kernel));
 gpuKernelCell = {gpuKernel};
-kernelCell = {kernel, kernel, kernel};
+kernelCell = {kernel, kernel, kernel, kernel, kernel, kernel, kernel};
+
 % cvcell = cudaConvFFTData(b,gccell);
 % [cvcell] = cudaConvFFTDataStreamas(cuFFTedData, kernelCell, [8, 8, 8, 16]);
 a = cudaConvFFTDataStreams(cuFFTedData, kernelCell, [8, 8, 8, 16]);
-a{1}
+a{1}(1:10, 1:10);
 % k = rand(5);
 % k(:,:,2) = rand(5);
 % [c] = cudaConv(b,single(k))
