@@ -6,8 +6,6 @@
 #include "cudaConvFFTData.h"
 #include "cudaConvFFTData.cuh"
 
-
-const int N_MAX_PARALLEL = 32;
 static bool debug = false;
 
 enum OUT_INDEX{
@@ -67,13 +65,13 @@ void mexFunction(int nlhs, mxArray *plhs[],
         mexErrMsgTxt("mxInitGPU fail");
     
     /* Throw an error if the input is not a GPU array. */
-    if ( (nrhs < 2) || (nrhs > 3) || !mxIsGPUArray(prhs[FFT_DATA_INDEX]) )
+    if ( (nrhs <  (KERNLE_CELL_INDEX + 1)) || (nrhs > (THREAD_SIZE_INDEX + 1) ) || !mxIsGPUArray(prhs[FFT_DATA_INDEX]) )
         mexErrMsgIdAndTxt(errId, "The data must be FFT-ed real array in GPU");
 
-    if (( nrhs == 3)  && mxGetNumberOfElements(prhs[THREAD_SIZE_INDEX]) != 4)
+    if (( nrhs > THREAD_SIZE_INDEX)  && mxGetNumberOfElements(prhs[THREAD_SIZE_INDEX]) != 4)
         mexErrMsgIdAndTxt(errId, "CUDA Thread Size must be 4 integers : THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D\nYou must choose size such that total thread will not be larger than MaxThreadsPerBlock");
 
-    if ( nrhs == 3 ){
+    if ( nrhs > THREAD_SIZE_INDEX ){
         const double* threadSize = (double *)mxGetData(prhs[THREAD_SIZE_INDEX]);
         THREAD_PER_BLOCK_H = (int)threadSize[0];
         THREAD_PER_BLOCK_W = (int)threadSize[1];
@@ -186,8 +184,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
         BATCH)); // batch
     
     mwSize *FFT_dims = (mwSize *)mxMalloc(2 * sizeof(mwSize));
-        FFT_dims[0] = FFT_H;
-        FFT_dims[1] = FFT_W;
+    FFT_dims[0] = FFT_H;
+    FFT_dims[1] = FFT_W;
 
     /* For each kernel iterate */
     for (int kernelIdx = 0; kernelIdx < N_KERNEL; kernelIdx++){
@@ -233,13 +231,13 @@ void mexFunction(int nlhs, mxArray *plhs[],
         }
 
         padData<<<dataBlockGrid3D, threadBlock3D>>>(
-            d_PaddedKernel,
-            d_Kernel,
-            FFT_W,
-            FFT_H,
-            KERNEL_W,
-            KERNEL_H,
-            FEATURE_DIM
+                d_PaddedKernel,
+                d_Kernel,
+                FFT_W,
+                FFT_H,
+                KERNEL_W,
+                KERNEL_H,
+                FEATURE_DIM
             );
 
 
@@ -279,6 +277,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
         CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(h_CONVOLUTION, d_CONVOLUTION, CONV_SIZE ,cudaMemcpyDeviceToHost));
 
         mxSetCell(plhs[CONVOLUTION_CELL_INDEX], kernelIdx, convolutionResult);
+
+        if(mxKernel == NULL) cudaFree(d_Kernel);
     }
     // plhs[1] = mxGPUCreateMxArrayOnGPU(mxFFTKernel);
 
@@ -293,7 +293,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     cufftDestroy(FFTplan_R2C);
     cufftDestroy(FFTplan_C2R);
 
-    if(mxKernel == NULL) mxGPUDestroyGPUArray(mxKernel);
+    if(mxKernel != NULL) mxGPUDestroyGPUArray(mxKernel);
 
     cudaFree(d_PaddedKernel);
     cudaFree(d_IFFTEProd);
@@ -301,7 +301,6 @@ void mexFunction(int nlhs, mxArray *plhs[],
     cudaFree(d_CFFT_KERNEL);
     cudaFree(d_FFTEProd);
     
-    if(mxKernel == NULL) cudaFree(d_Kernel);
 
     mxFree(FFT_dims);
 }

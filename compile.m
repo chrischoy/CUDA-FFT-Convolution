@@ -7,3 +7,4 @@ if ismac
 end
 cuda_compile('cudaFFTData',MATLAB_ROOT, CUDA_ROOT, true)
 cuda_compile('cudaConvFFTData',MATLAB_ROOT, CUDA_ROOT, true)
+cuda_compile('cudaConvolutionFFT',MATLAB_ROOT, CUDA_ROOT, true)

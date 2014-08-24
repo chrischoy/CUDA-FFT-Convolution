@@ -64,4 +64,41 @@ int checkDeviceProp ( cudaDeviceProp p ) {
     return support;
 }
 
+int computeFFTsize(int dataSize){
+    //Highest non-zero bit position of dataSize
+    int hiBit;
+    //Neares lower and higher powers of two numbers for dataSize
+    unsigned int lowPOT, hiPOT;
+
+    //Align data size to a multiple of half-warp
+    //in order to have each line starting at properly aligned addresses
+    //for coalesced global memory writes in padKernel() and padData()
+    dataSize = iAlignUp(dataSize, 16);
+
+    //Find highest non-zero bit
+    for(hiBit = 31; hiBit >= 0; hiBit--)
+        if(dataSize & (1U << hiBit)) break;
+
+    //No need to align, if already power of two
+    lowPOT = 1U << hiBit;
+    if(lowPOT == dataSize) return dataSize;
+
+    //Align to a nearest higher power of two, if the size is small enough,
+    //else align only to a nearest higher multiple of 512,
+    //in order to save computation and memory bandwidth
+    hiPOT = 1U << (hiBit + 1);
+    //if(hiPOT <= 1024)
+        return hiPOT;
+    //else 
+    //  return iAlignUp(dataSize, 512);
+}
+
+int computeFFTsize16(int dataSize){
+    // Compute the multiple of 16
+    int mod = dataSize / 16;
+    int rem = dataSize % 16;
+
+    return (mod * 16) + ((rem > 0)?16:0);
+}
+
 #endif

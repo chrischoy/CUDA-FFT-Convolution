@@ -2,8 +2,8 @@
 MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
 CUDA_ROOT = '/usr/local/cuda-6.0/';
 if ismac
-  dyld = getenv('PATH')
-  setenv('PATH',[dyld ':/usr/local/cuda/bin']);
+%   dyld = getenv('PATH')
+%   setenv('PATH',[dyld ':/usr/local/cuda/bin']);
 
   MATLAB_ROOT = '/Applications/MATLAB_R2014a.app/';
   CUDA_ROOT = '/usr/local/cuda/';

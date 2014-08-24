@@ -1,95 +1,17 @@
 #include <cuda.h>
 #include <cufft.h>
-#include "cutil.h"
 #include "mex.h"
 #include "gpu/mxGPUArray.h"
+#include "cudaConvFFTData.h"
+#include "cudaConvFFTData.cuh"
 
-#define IMUL(a, b) __mul24(a, b)
 static bool debug = false;
 
-/*
- * Device Code
- */
-__global__ void padData(
-    float *d_PaddedData,
-    float *d_Data,
-    int fftW,
-    int fftH,
-    int dataW,
-    int dataH,
-    int FEATURE_DIM
-){
-    const int x = IMUL(blockDim.x, blockIdx.x) + threadIdx.x;
-    const int y = IMUL(blockDim.y, blockIdx.y) + threadIdx.y;
-    const int z = IMUL(blockDim.z, blockIdx.z) + threadIdx.z;
-
-    if(x < fftW && y < fftH && z < FEATURE_DIM){
-        if(x < dataW && y < dataH)
-            d_PaddedData[IMUL(z, IMUL(fftW, fftH)) + IMUL(x, fftH) + y] = 
-                    d_Data[ IMUL(z, IMUL(dataH, dataW)) + IMUL(x, dataH ) + y];
-        else
-            d_PaddedData[IMUL(z, IMUL(fftW, fftH)) + IMUL(x, fftH) + y] = 0;
-    }
-}
-
-/*
- * Host code
- */
-
-////////////////////////////////////////////////////////////////////////////////
-// Helper functions
-////////////////////////////////////////////////////////////////////////////////
-//Round a / b to nearest higher integer value
-int iDivUp(int a, int b){
-    return (a % b != 0) ? (a / b + 1) : (a / b);
-}
-
-//Align a to nearest higher multiple of b
-int iAlignUp(int a, int b){
-    return (a % b != 0) ?  (a - a % b + b) : a;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Data configuration
-////////////////////////////////////////////////////////////////////////////////
-int computeFFTsize(int dataSize){
-    //Highest non-zero bit position of dataSize
-    int hiBit;
-    //Neares lower and higher powers of two numbers for dataSize
-    unsigned int lowPOT, hiPOT;
-
-    //Align data size to a multiple of half-warp
-    //in order to have each line starting at properly aligned addresses
-    //for coalesced global memory writes in padKernel() and padData()
-    dataSize = iAlignUp(dataSize, 16);
-
-    //Find highest non-zero bit
-    for(hiBit = 31; hiBit >= 0; hiBit--)
-        if(dataSize & (1U << hiBit)) break;
-
-    //No need to align, if already power of two
-    lowPOT = 1U << hiBit;
-    if(lowPOT == dataSize) return dataSize;
-
-    //Align to a nearest higher power of two, if the size is small enough,
-    //else align only to a nearest higher multiple of 512,
-    //in order to save computation and memory bandwidth
-    hiPOT = 1U << (hiBit + 1);
-    //if(hiPOT <= 1024)
-        return hiPOT;
-    //else 
-    //  return iAlignUp(dataSize, 512);
-}
-
-int computeFFTsize16(int dataSize){
-    // Compute the multiple of 16
-    int mod = dataSize / 16;
-    int rem = dataSize % 16;
-
-    return (mod * 16) + ((rem > 0)?16:0);
-}
-
-
+enum IN_INDEX{
+    DATA_INDEX,
+    KERNEL_H_INDEX,
+    KERNEL_W_INDEX
+};
 ////////////////////////////////////////////////////////////////////////////////
 // Mex Entry
 ////////////////////////////////////////////////////////////////////////////////
@@ -97,7 +19,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
                  int nrhs, mxArray const *prhs[])
 {
     /* Declare all variables.*/
-    const mxArray *mxDATA = prhs[0];
+    const mxArray *mxDATA = prhs[DATA_INDEX];
     mxGPUArray *FFT_DATA;
     float2 *d_CFFT_DATA;
     float *h_Data;
@@ -118,7 +40,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     
     /* Initialize the MathWorks GPU API. */
-    mxInitGPU();
+    // If initialized mxInitGPU do nothing
+    if (mxInitGPU() != MX_GPU_SUCCESS)
+        mexErrMsgTxt("mxInitGPU fail");
 
     
     /* Throw an error if the input is not a GPU array. */
@@ -131,8 +55,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     // Kernel dimensions
-    KERNEL_H = (int)mxGetScalar(prhs[1]);
-    KERNEL_W = (int)mxGetScalar(prhs[2]);
+    KERNEL_H = (int)mxGetScalar(prhs[KERNEL_H_INDEX]);
+    KERNEL_W = (int)mxGetScalar(prhs[KERNEL_W_INDEX]);
     if(debug) fprintf(stderr,"Kernel size: h=%d, w=%d\n",KERNEL_H,KERNEL_W);
 
     // Data dimensions
@@ -158,30 +82,30 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     DATA_SIZE = DATA_W * DATA_H * FEATURE_DIM * sizeof(float);
     FFT_SIZE  = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float);
-    CFFT_SIZE = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float2);
+    // CFFT_SIZE = FFT_W  * FFT_H  * FEATURE_DIM * sizeof(float2);
 
     // Allocate memory for input
     // No need to initialize using mxCalloc
     
-    mwSize *FFT_dims = (mwSize *)mxMalloc(3 * sizeof(mwSize));
+    mwSize CFFT_dims[3];
 
-    FFT_dims[0] = FFT_H/2 + 1;
-    FFT_dims[1] = FFT_W;
-    FFT_dims[2] = FEATURE_DIM;
+    CFFT_dims[0] = FFT_H/2 + 1;
+    CFFT_dims[1] = FFT_W;
+    CFFT_dims[2] = FEATURE_DIM;
 
     /* Wrap the result up as a MATLAB gpuArray for return. */
     FFT_DATA = mxGPUCreateGPUArray(3,
-                                FFT_dims,
+                                CFFT_dims,
                                 mxSINGLE_CLASS,
                                 mxCOMPLEX,
                                 MX_GPU_INITIALIZE_VALUES);
     
     d_CFFT_DATA = (float2 *)mxGPUGetData(FFT_DATA);
     
-    cudaMalloc((void **)&d_Data,        DATA_SIZE);
-    cudaMalloc((void **)&d_PaddedData,  FFT_SIZE);
+    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_Data,        DATA_SIZE));
+    CUDA_SAFE_CALL_NO_SYNC(cudaMalloc((void **)&d_PaddedData,  FFT_SIZE));
 
-    cudaMemcpy(d_Data, h_Data, DATA_SIZE, cudaMemcpyHostToDevice);
+    CUDA_SAFE_CALL_NO_SYNC(cudaMemcpy(d_Data, h_Data, DATA_SIZE, cudaMemcpyHostToDevice));
 
     dim3 threadBlock(THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D);
     dim3 dataBlockGrid( iDivUp(FFT_W, threadBlock.x), 
@@ -189,13 +113,13 @@ void mexFunction(int nlhs, mxArray *plhs[],
                         iDivUp(FEATURE_DIM, threadBlock.z));
 
     padData<<<dataBlockGrid, threadBlock>>>(
-        d_PaddedData,
-        d_Data,
-        FFT_W,
-        FFT_H,
-        DATA_W,
-        DATA_H,
-        FEATURE_DIM
+            d_PaddedData,
+            d_Data,
+            FFT_W,
+            FFT_H,
+            DATA_W,
+            DATA_H,
+            FEATURE_DIM
         );
 
     if(debug) fprintf(stderr,"Padding\n");
@@ -220,7 +144,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
 
     CUFFT_SAFE_CALL(cufftExecR2C(FFTplan_R2C, d_PaddedData, d_CFFT_DATA));
-    CUFFT_SAFE_CALL(cudaDeviceSynchronize());
+    CUDA_SAFE_CALL_NO_SYNC(cudaDeviceSynchronize());
     if(debug) fprintf(stderr,"Sync\n");
 
     plhs[0] = mxGPUCreateMxArrayOnGPU(FFT_DATA);
@@ -233,5 +157,4 @@ void mexFunction(int nlhs, mxArray *plhs[],
     cufftDestroy(FFTplan_R2C);
     cudaFree(d_Data);
     cudaFree(d_PaddedData);
-    mxFree(FFT_dims);
 }
