@@ -26,8 +26,11 @@ str2num(gpuInfo.ComputeCapability)
   else
     lp = getenv('LIBRARY_PATH');
     setenv('LIBRARY_PATH', [lp ':' matlabroot '/bin/glnxa64']);
-    eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' matlabroot '/bin/glnxa64 -lcudart -lcufft -lmwgpu']);    
-    %eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' cudaroot '/lib64 -lcudart -lcufft -L' matlabroot '/bin/glnxa64 -lmwgpu']);  
+    if optimize
+      eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' matlabroot '/bin/glnxa64 -lcudart -lcufft -lmwgpu']);    
+    else
+      eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' cudaroot '/lib64 -lcudart -lcufft -L' matlabroot '/bin/glnxa64 -lmwgpu']);
+    end
   end
 end
   
