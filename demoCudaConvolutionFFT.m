@@ -25,22 +25,22 @@ n = 64;
 m = 8;
 k = 5;
 
-cn = 3;
-cm = 3;
+cn = 10;
+cm = 4;
 data = single(rand(n,m));
 for i = 2:k
   data(:,:,i) = single(rand(n,m));
 end
 
-kernel = zeros(3,3,k,'single');
-kernel(:,:,1) = single([1 2 3;4 5 6; 7 8 9]);
+kernel = zeros(cn,cm,k,'single');
+kernel(:,:,1) = single(reshape(1:cn*cm,cn,cm));
 for i = 2:k
   kernel(:,:,i) = single(rand(cn,cm));
 end
 
-data(5:7,2:4,1) = kernel(:,:,1);
-data(21:23,1:3,2) = kernel(:,:,1);
-data(1:3,m-2:m,k) = kernel(:,:,1);
+data(5:(4+cn),2:(1+cm),1) = kernel(:,:,1);
+data(21:(20+cn),1:cm,2) = kernel(:,:,1);
+data(1:cn,(m-(cm-1)):m,k) = kernel(:,:,1);
 kernel(:,:,k) = kernel(:,:,1);
 
 
