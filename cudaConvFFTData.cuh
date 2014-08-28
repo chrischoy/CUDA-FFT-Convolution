@@ -165,7 +165,6 @@ __global__ void sumAlongFeaturesReductionUnroll32(
             sdata[tid] = convolutionPerFeature[result_i + (  threadIdx.z *  N )] ;
 
         __syncthreads();
-        
         if (threadIdx.z + 8 < PREV_POW_2_FEATURE_DIM) sdata[tid] +=sdata[tid + IMUL( 8, SharedN)];__syncthreads();
         if (threadIdx.z + 4 < PREV_POW_2_FEATURE_DIM) sdata[tid] +=sdata[tid + IMUL( 4, SharedN)];__syncthreads();
         if (threadIdx.z + 2 < PREV_POW_2_FEATURE_DIM) sdata[tid] +=sdata[tid + IMUL( 2, SharedN)];__syncthreads();

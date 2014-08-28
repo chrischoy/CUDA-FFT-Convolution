@@ -23,7 +23,7 @@ cuda_compile('cudaConvolutionFFT',MATLAB_ROOT, CUDA_ROOT, 0);
 clear;
 n = 64;
 m = 8;
-k = 31;
+k = 32;
 
 cn = 10;
 cm = 4;
