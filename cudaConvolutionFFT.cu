@@ -6,7 +6,7 @@
 #include "cudaConvFFTData.h"
 #include "cudaConvFFTData.cuh"
 
-static bool debug = false;
+static bool debug = true;
 
 enum OUT_INDEX{
     CONVOLUTION_CELL_INDEX
@@ -33,6 +33,10 @@ void mexFunction(int nlhs, mxArray *plhs[],
     int THREAD_PER_BLOCK_W = 8;
     int THREAD_PER_BLOCK_D = 8;
     int THREAD_PER_BLOCK_2D = 32;
+
+    int THREAD_PER_BLOCK_H_SUM = 2;
+    int THREAD_PER_BLOCK_W_SUM = 4;
+    int THREAD_PER_BLOCK_D_SUM = 32;
 
     /* Initialize the MathWorks GPU API. */
     // If initialized mxInitGPU do nothing
@@ -80,8 +84,10 @@ void mexFunction(int nlhs, mxArray *plhs[],
         if(debug) fprintf(stderr,"Thread size: H=%d, W=%d, D=%d, 2D=%d\n", THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D);
     }
 
-
-
+    /////////////////////////
+    // DEBUGGING IN MULTI_GPU
+    // CUDA_SAFE_CALL(cudaSetDevice(1));
+    /////////////////////////
 
     /*  FFT Data */
     // Data dimensions
@@ -185,10 +191,14 @@ void mexFunction(int nlhs, mxArray *plhs[],
     float *d_Kernel;
     int KERNEL_H, KERNEL_W, KERNEL_SIZE;
 
-    dim3 threadBlock2D( THREAD_PER_BLOCK_2D, THREAD_PER_BLOCK_2D);
-    dim3 dataBlockGrid2D( iDivUp(FFT_W, threadBlock2D.x), 
-                        iDivUp(FFT_H, threadBlock2D.y));
+
+    int PREV_POW_2_FEATURE_DIM = (int)prev_pow_2((unsigned int)FEATURE_DIM);
+    int SharedN =  THREAD_PER_BLOCK_H_SUM * THREAD_PER_BLOCK_W_SUM * PREV_POW_2_FEATURE_DIM * sizeof(float);
+    dim3 threadBlock3DSum(THREAD_PER_BLOCK_H_SUM, THREAD_PER_BLOCK_W_SUM, PREV_POW_2_FEATURE_DIM);
+    dim3 dataBlockGrid2DSum( iDivUp(FFT_W, threadBlock3DSum.x), 
+                        iDivUp(FFT_H, threadBlock3DSum.y));
     
+    if(debug) fprintf(stderr,"SharedN : %d\n", SharedN);
     mwSize mwCONV_Dims[2];
     mwCONV_Dims[0] = FFT_H;
     mwCONV_Dims[1] = FFT_W;
@@ -267,13 +277,17 @@ void mexFunction(int nlhs, mxArray *plhs[],
         CUFFT_SAFE_CALL(cufftExecC2R(FFTplan_C2R, d_FFTEProd, d_IFFTEProd));
         CUDA_SAFE_CALL_NO_SYNC(cudaDeviceSynchronize());
 
-        sumAlongFeatures<<<dataBlockGrid2D, threadBlock2D>>>(
+        sumAlongFeaturesReductionUnroll32<<<dataBlockGrid2DSum, threadBlock3DSum, SharedN>>>(
                 d_CONVOLUTION,
                 d_IFFTEProd,
                 FFT_H,
                 FFT_W,
-                FEATURE_DIM
+                FFT_H * FFT_W,
+                FEATURE_DIM,
+                PREV_POW_2_FEATURE_DIM
             );
+        
+        CUDA_SAFE_CALL_NO_SYNC(cudaDeviceSynchronize());
 
         mxArray * convolutionResult = mxCreateNumericArray(2, mwCONV_Dims, mxSINGLE_CLASS, mxREAL);
         float * h_CONVOLUTION = (float *)mxGetData(convolutionResult);

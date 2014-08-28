@@ -1,7 +1,7 @@
 % demo
 clear;
-g = gpuDevice(1);
-reset(g);
+% g = gpuDevice(1);
+% reset(g);
 
 % matlab gpu dynamic library will be loaded.
 cos(gpuArray(1));
@@ -23,7 +23,7 @@ cuda_compile('cudaConvolutionFFT',MATLAB_ROOT, CUDA_ROOT, 0);
 clear;
 n = 64;
 m = 8;
-k = 5;
+k = 31;
 
 cn = 10;
 cm = 4;
@@ -38,10 +38,11 @@ for i = 2:k
   kernel(:,:,i) = single(rand(cn,cm));
 end
 
-data(5:(4+cn),2:(1+cm),1) = kernel(:,:,1);
-data(21:(20+cn),1:cm,2) = kernel(:,:,1);
-data(1:cn,(m-(cm-1)):m,k) = kernel(:,:,1);
-kernel(:,:,k) = kernel(:,:,1);
+kernel(:,:,5) = kernel(:,:,1);
+data(5:(4+cn),    2:(1+cm),  5) = kernel(:,:,1);
+data(21:(20+cn),  1:cm,     10) = kernel(:,:,1);
+data(1:cn,(m-(cm-1)):m,k-15) = kernel(:,:,1);
+kernel(:,:,k-15) = kernel(:,:,1);
 
 
 for i = 1:k
@@ -76,6 +77,8 @@ ematlab = matFFTedKernel .* (matFFTedData);
 matFFTConv = ifft2(ematlab(:,:,1));
 matFFTConv(:,:,2) = ifft2(ematlab(:,:,2));
 
+
+sum(sum(abs(cvg(1:n + cn - 1,1:m + cm - 1) - cvmatlab)))
 
 % dgc = [dg; conj([dg(end-1:-1:2, 1,:) dg(end-1:-1:2, end:-1:2,:)])];
 % figure(1); subplot(121); imagesc(real(dmatlab(:,:,1))); subplot(122); imagesc(real(dgc(:,:,1)));
