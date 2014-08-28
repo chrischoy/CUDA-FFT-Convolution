@@ -81,11 +81,11 @@ __global__ void sumAlongFeatures(
         const int result_i = IMUL(FFT_H, x) + y;
         const int N = IMUL(FFT_W, FFT_H);
 
-        convolutionResult[result_i] = convolutionPerFeature[result_i];
+        float acc = convolutionPerFeature[result_i];
         for (int z = 1; z < FEATURE_DIM; z++){
-            convolutionResult[result_i] += 
-                convolutionPerFeature[IMUL(z, N) + result_i];
+             acc += convolutionPerFeature[IMUL(z, N) + result_i];
         }
+        convolutionResult[result_i] = acc;
     }
 }
     
