@@ -1,6 +1,8 @@
 % demo
+
 clear;
-g = gpuDevice(1);
+device_id = 2;
+g = gpuDevice(device_id);
 reset(g);
 
 % matlab gpu dynamic library will be loaded.
@@ -20,7 +22,6 @@ end
 % Debugging compile
 cuda_compile('cudaConvolutionFFT',MATLAB_ROOT, CUDA_ROOT, 0); 
 
-clear;
 n = 64;
 m = 8;
 k = 5;
@@ -59,7 +60,7 @@ for i = 1:k
 end
 kernelCell = {kernel, kernel, kernel};
 
-[cvcell] = cudaConvolutionFFT(data, cn, cm, kernelCell, [8, 8, 8, 16]);
+[cvcell] = cudaConvolutionFFT(data, cn, cm, kernelCell, [8, 8, 8, 16], device_id-1);
 cvg = cvcell{1};
 % cvg = gather(cv);
 % dg = gather(d);

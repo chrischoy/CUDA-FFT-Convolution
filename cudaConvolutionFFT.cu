@@ -17,7 +17,8 @@ enum IN_INDEX{
     MAX_KERNEL_H_INDEX,
     MAX_KERNEL_W_INDEX,
     KERNLE_CELL_INDEX,
-    THREAD_SIZE_INDEX // Optional
+    THREAD_SIZE_INDEX, // Optional
+    GPU_INDEX          // Optional
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -41,7 +42,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
     
 
     /* Throw an error if the number of inputs mismatch */
-    if ( (nrhs <  (KERNLE_CELL_INDEX + 1)) || (nrhs > (THREAD_SIZE_INDEX + 1) ))
+    if ( (nrhs <  (KERNLE_CELL_INDEX + 1)) || (nrhs > (GPU_INDEX + 1) ))
         mexErrMsgIdAndTxt(errId, "Wrong number of inputs");
 
 
@@ -80,7 +81,12 @@ void mexFunction(int nlhs, mxArray *plhs[],
         if(debug) fprintf(stderr,"Thread size: H=%d, W=%d, D=%d, 2D=%d\n", THREAD_PER_BLOCK_H, THREAD_PER_BLOCK_W, THREAD_PER_BLOCK_D, THREAD_PER_BLOCK_2D);
     }
 
-
+    int GPU_ID = 0;
+    if (nrhs > GPU_INDEX ){
+       GPU_ID = (int)mxGetScalar(prhs[GPU_INDEX]); 
+       if(debug) fprintf(stderr,"Using GPU : %d\n", GPU_ID);
+       cudaSetDevice(GPU_ID);
+    }
 
 
     /*  FFT Data */
