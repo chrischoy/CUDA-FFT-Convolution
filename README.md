@@ -3,7 +3,7 @@ MatlabCUDAConv
 
 Using a standard multi-threaded CPU convolution for very large kernels can be very time-consuing. This package provides a convolution using Fast Fourier Transformation implementation using CUDA.
 
-Standard convolution can take O(nm) time compare to O(n log n + m log m) where n is the data length and k is the kernel length.
+Standard convolution can take O(nm) time compare to O((n+m) log (n+m)) where n is the data length and k is the kernel length.
 
 ## cudaConvolutionFFT.cu
 
@@ -31,3 +31,4 @@ compile
 demoCudaConvolutionFFT
 ```
 
+WARNING : Refactoring in progress
