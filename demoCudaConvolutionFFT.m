@@ -1,18 +1,14 @@
-% demo
+% MatlabCUDAConv 
+%
+% To speed up convolutions, I made 
 
-clear;
-device_id = 2;
-g = gpuDevice(device_id);
-reset(g);
+% ------------------------------------------------------------------------------
+%                                                                       Compile
+% ------------------------------------------------------------------------------
 
-% matlab gpu dynamic library will be loaded.
-cos(gpuArray(1));
-
+% Change the following lines
 MATLAB_ROOT = '/afs/cs/package/matlab-r2013b/matlab/r2013b/';
-CUDA_ROOT = '/usr/local/cuda-6.0/';
-
-% ld = getenv('LD_LIBRARY_PATH');
-% setenv('LD_LIBRARY_PATH',[ld ':/usr/local/cuda-5.5/']);
+CUDA_ROOT = '/usr/local/cuda-6.5/';
 
 if ismac
   MATLAB_ROOT = '/Applications/MATLAB_R2014a.app/';
@@ -20,35 +16,59 @@ if ismac
 end
 
 % Debugging compile
-cuda_compile('cudaConvolutionFFT',MATLAB_ROOT, CUDA_ROOT, 0); 
+cuda_compile('src/cudaConvolutionFFT',MATLAB_ROOT, CUDA_ROOT, './bin', 0); 
 
-n = 64;
-m = 105;
-k = 5;
+% ------------------------------------------------------------------------------
+%                                                                  Clear the GPU
+% ------------------------------------------------------------------------------
 
-cn = 10;
-cm = 4;
+clear;
+device_id = 1; % 1-base GPU index (MATLAB convention)
+g = gpuDevice(device_id);
+reset(g);
+cos(gpuArray(1)); % force matlab gpu dynamic library loading
+
+
+% ------------------------------------------------------------------------------
+%                                                              Experiment setup
+% ------------------------------------------------------------------------------
+
+n = 64;  % data height
+m = 105; % data width
+k = 5;   % number of channels
+
+cn = 10; % kernel height
+cm = 4;  % kernel width
+
+% Make random data
 data = single(rand(n,m));
 for i = 2:k
   data(:,:,i) = single(rand(n,m));
 end
 
+% Make random kernel
 kernel = zeros(cn,cm,k,'single');
 kernel(:,:,1) = single(reshape(1:cn*cm,cn,cm));
 for i = 2:k
   kernel(:,:,i) = single(rand(cn,cm));
 end
 
+% To verify experiment, put kernel values to specific regions
 data(5:(4+cn),2:(1+cm),1) = kernel(:,:,1);
 data(21:(20+cn),1:cm,2) = kernel(:,:,1);
 data(1:cn,(m-(cm-1)):m,k) = kernel(:,:,1);
 kernel(:,:,k) = kernel(:,:,1);
 
+% ------------------------------------------------------------------------------
+%                                                         Flip Kernel (Required)
+% ------------------------------------------------------------------------------
 
 for i = 1:k
   kernel(:,:,i) = kernel(end:-1:1,end:-1:1,i);
 end
 
+
+% TODO
 matFFTedData = zeros(80,16,k);
 for i = 1:k
   matFFTedData(:,:,i) = fft2(data(:,:,i),80,16);

@@ -1,31 +1,33 @@
 MatlabCUDAConv
 ==============
 
-MATLAB wrapped convolution function using CUDA
+Using a standard multi-threaded CPU convolution for very large kernels can be very time-consuing. This package provides a convolution using Fast Fourier Transformation implementation using CUDA.
 
-cudaFFTData.cu
+Standard convolution can take O(nm) time compare to O(n log n + m log m) where n is the data length and k is the kernel length.
 
-IN : host float
-        k-dim m x n data 
-     host int
-        max m kernel
-     host int
-        max n kernel
+## cudaConvolutionFFT.cu
 
-OUT : device complex float
-        k-dim close multiple of 16 ( m + max p ) close multiple of 16 ( n + max q )
+Takes data, max kernel height, width, convolution kernels (multiple cells (can have different sizes)) and returns convolution results corresponding to the convolution kernels.
 
-cudaConv.cu
- 
-IN : device float
-        k-dim close multiple of 16 ( m + max p ) close multiple of 16 ( n + max q )
 
-     host float
-        k-dim p x q kernel
+## Usage
 
-OUT : device float
-        close multiple of 16 ( m + max p ) close multiple of 16 ( n + max q )
+1. Download the repo
 
-      [device float
-        kernel in GPU.]
+```
+git clone git@github.com:chrischoy/MatlabCUDAConv
+```
+
+2. Go to the repo. Open MATLAB and type
+
+```
+compile
+```
+
+3. Run demo
+
+
+```
+demoCudaConvolutionFFT
+```
 
