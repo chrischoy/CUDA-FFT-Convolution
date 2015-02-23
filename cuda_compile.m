@@ -1,40 +1,90 @@
-function cuda_compile( func_name, matlabroot, cudaroot, outpath, debug)
-if nargin == 3
-  debug = true;
+function cuda_compile( src_path, func_name, matlab_root, cuda_root, out_path, debug)
+%CUDA_COMPILE general cuda compiling helper for MATLAB version < 2014a
+if nargin < 6
+  debug = false;
 end
 
-gpuInfo = gpuDevice
-str2num(gpuInfo.ComputeCapability)
+if ~exist('./bin', 'dir')
+  mkdir('./bin')
+end
+
+% TODO: For matlab version < 8.0.1, Use the following setting,
 % if ~verLessThan('matlab', '8.0.1')
-%   % http://www.mathworks.com/help/distcomp/run-mex-functions-containing-cuda-code.html
+% http://www.mathworks.com/help/distcomp/run-mex-functions-containing-cuda-code.html
 %   setenv('MW_NVCC_PATH',[cudaroot '/nvcc'])
 %   eval(sprintf('mex -v -largeArrayDims %s.cu',func_name));
 % elseif isunix && ~ismac && verLessThan('matlab', '8.0.1')
-  eval(['!rm bin/' func_name '.o']);
-  debug = '-g';
-  if debug
-    debug = '';
-  end
-  
-  if debug
-    eval(sprintf('!%s/bin/nvcc -O3 -DNDEBUG -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -fPIC -v -I./common -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s',cudaroot, matlabroot, matlabroot, func_name));
-  else
-    eval(sprintf('!%s/bin/nvcc -g -G -O0 -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s -out-file %s', cudaroot, matlabroot, matlabroot, func_name, out_file));
-  end
-  
-  if ismac
-    eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' matlabroot '/bin/maci64  -lcudart -lcufft -lmwgpu']);  
-  else
-    lp = getenv('LIBRARY_PATH');
-    setenv('LIBRARY_PATH', [lp ':' matlabroot '/bin/glnxa64']);
-    if debug
-      eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' matlabroot '/bin/glnxa64 -lcudart -lcufft -lmwgpu']);    
-    else
-      eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' cudaroot '/lib64 -lcudart -lcufft -L' matlabroot '/bin/glnxa64 -lmwgpu']);
-    end
-  end
+
+
+% ------------------------------------------------------------------------------
+%                                                Check cuda computing capability
+% ------------------------------------------------------------------------------
+% TODO, CUDA Stream if high CM
+gpuInfo = gpuDevice;
+fprintf('Your GPU Computing Capability %d\n', str2num(gpuInfo.ComputeCapability));
+
+% Remove compiled binary files
+eval(['!rm bin/' func_name '.o']);
+
+% ------------------------------------------------------------------------------
+%                                                    Setup environment variables
+% ------------------------------------------------------------------------------
+
+% Set debugging flag
+if debug
+  nvcc_debug_flag = '-g -G -O0';
+  mex_debug_flag = '-g';
+else
+  nvcc_debug_flag = '-O3 -DNDEBUG';
+  mex_debug_flag = '';
 end
-  
+
+if ismac
+  matlab_bin_path = '/bin/maci64';
+else
+  matlab_bin_path = '/bin/glnxa64';
+end
+
+INCLUDE_PATH = sprintf([...
+    '-I./common ',...
+    '-I%s/extern/include ',...
+    '-I%s/toolbox/distcomp/gpu/extern/include'],...
+    matlab_root, matlab_root);
+NVCC_OPTS = '-arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false';
+COMPILER_OPTS = '-Xcompiler -fPIC -v';
+
+MEX_OPTS = '-largeArrayDims';
+MEX_INCLUDE_PATH = sprintf('-I%s/include', cuda_root);
+MEX_LIBS = '-lcudart -lcufft -lmwgpu';
+MEX_LIBRARY_PATH = ['-L', matlab_root, matlab_bin_path];
+
+% ------------------------------------------------------------------------------
+%                                                                       Compile
+% ------------------------------------------------------------------------------
+
+% Compile the object file
+compile_string = sprintf([...
+    '!%s/bin/nvcc ',...
+    '%s ',... % Debug flag
+    '%s ',... % Compiler options
+    '%s ',... % NVCC_OPTS
+    '%s ',... % Include paths
+    '-c %s/%s.cu --output-file %s/%s.o'], ...
+    cuda_root, nvcc_debug_flag, COMPILER_OPTS, NVCC_OPTS, INCLUDE_PATH, src_path, func_name, out_path, func_name);
+disp(compile_string);
+eval(compile_string);
+
+compile_string = sprintf(['mex ',...
+    '%s ',... % Debug flag
+    '%s ',... % Mex options
+    '%s/%s.o  ',... % Object file
+    '%s ',... % Mex library path
+    '%s ',... % Mex libraries
+    '-outdir %s'],... % Out path
+    mex_debug_flag, MEX_OPTS, out_path, func_name, MEX_LIBRARY_PATH, MEX_LIBS, out_path);
+disp(compile_string);
+eval(compile_string);
+
 % % Run system command
 % !nvcc -O3 -DNDEBUG -c cudaconv.cu -Xcompiler -fPIC -I/afs/cs/package/matlab-r2013b/matlab/r2013b/extern/include -I/afs/cs/package/matlab-r2013b/matlab/r2013b/toolbox/distcomp/gpu/extern/include
 % % Link object

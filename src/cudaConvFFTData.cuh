@@ -5,8 +5,6 @@
  * Device Code
  */
 
-#define TILE_DIM 32
-
 ////////////////////////////////////////////////////////////////////////////////
 // Pad data with zeros, 
 ////////////////////////////////////////////////////////////////////////////////
@@ -61,38 +59,12 @@ __global__ void elementwiseProductAndNormalize(
     
     if(x < FFT_W && y < FFT_H && z < FEATURE_DIM){
         // int i = IMUL(z, IMUL(FFT_W, FFT_H)) + IMUL(FFT_H, x) + y;
-        int i = z * FFT_W * FFT_H + FFT_W * y + x;
+        int i = z * FFT_W * FFT_H + FFT_H * x + y;
         // complexConjMulAndScale(fft_Output[i], fft_PaddedData[i], fft_PaddedKernel[i], scale);
         fft_Output[i].x = scale * (fft_PaddedData[i].x * fft_PaddedKernel[i].x - fft_PaddedData[i].y * fft_PaddedKernel[i].y);
         fft_Output[i].y = scale * (fft_PaddedData[i].y * fft_PaddedKernel[i].x + fft_PaddedData[i].x * fft_PaddedKernel[i].y);
     }
 }
-
-__global__ void elementwiseProductAndNormalizeSharedMem(
-    cufftComplex *fft_Output,
-    const cufftComplex *fft_PaddedData,
-    const cufftComplex *fft_PaddedKernel,
-    int FFT_H,
-    int FFT_W,
-    int FEATURE_DIM,
-    float scale
-){
-	__shared__ cufftComplex tile[TILE_DIM][TILE_DIM];
-
-    const int x = IMUL(blockDim.x, blockIdx.x) + threadIdx.x;
-    const int y = IMUL(blockDim.y, blockIdx.y) + threadIdx.y;
-    const int z = IMUL(blockDim.z, blockIdx.z) + threadIdx.z;
-
-    for (int j = 0; j < TILE_DIM; j += )
-    if(x < FFT_W && y < FFT_H && z < FEATURE_DIM){
-        // int i = IMUL(z, IMUL(FFT_W, FFT_H)) + IMUL(FFT_H, x) + y;
-        int i = z * FFT_W * FFT_H + FFT_W * y + x;
-        // complexConjMulAndScale(fft_Output[i], fft_PaddedData[i], fft_PaddedKernel[i], scale);
-        fft_Output[i].x = scale * (fft_PaddedData[i].x * fft_PaddedKernel[i].x - fft_PaddedData[i].y * fft_PaddedKernel[i].y);
-        fft_Output[i].y = scale * (fft_PaddedData[i].y * fft_PaddedKernel[i].x + fft_PaddedData[i].x * fft_PaddedKernel[i].y);
-    }
-}
-
 
 /* Support in-place computation, i.e. input and output can be the same */
 __global__ void sumAlongFeatures(
@@ -106,7 +78,7 @@ __global__ void sumAlongFeatures(
     const int y = IMUL(blockDim.y, blockIdx.y) + threadIdx.y;
 
     if(x < FFT_W && y < FFT_H){
-        const int result_i = IMUL(FFT_W, y) + x;
+        const int result_i = IMUL(FFT_H, x) + y;
         const int N = IMUL(FFT_W, FFT_H);
 
         float acc = convolutionPerFeature[result_i];
@@ -119,30 +91,5 @@ __global__ void sumAlongFeatures(
     }
 }
     
-
-/* Support in-place computation, i.e. input and output can be the same */
-__global__ void sumAlongFeaturesSharedMem(
-    float *convolutionResult,
-    const float *convolutionPerFeature,
-    int FFT_H,
-    int FFT_W,
-    int FEATURE_DIM
-){
-    const int x = IMUL(blockDim.x, blockIdx.x) + threadIdx.x;
-    const int y = IMUL(blockDim.y, blockIdx.y) + threadIdx.y;
-
-    if(x < FFT_W && y < FFT_H){
-        const int result_i = IMUL(FFT_H, y) + x;
-        const int N = IMUL(FFT_W, FFT_H);
-
-        float acc = convolutionPerFeature[result_i];
-        int zN = N;
-        for (int z = 1; z < FEATURE_DIM; z++){
-            acc += convolutionPerFeature[zN + result_i];
-            zN += N;
-        }
-        convolutionResult[result_i] = acc;
-    }
-}
 
 #endif

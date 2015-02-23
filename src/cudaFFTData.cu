@@ -86,7 +86,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 
     // Allocate memory for input
     // No need to initialize using mxCalloc
-    
+
     mwSize CFFT_dims[3];
 
     CFFT_dims[0] = FFT_H/2 + 1;
