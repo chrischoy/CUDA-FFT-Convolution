@@ -1,6 +1,6 @@
-function cuda_compile( func_name, matlabroot, cudaroot, optimize)
+function cuda_compile( func_name, matlabroot, cudaroot, outpath, debug)
 if nargin == 3
-  optimize = true;
+  debug = true;
 end
 
 gpuInfo = gpuDevice
@@ -10,23 +10,24 @@ str2num(gpuInfo.ComputeCapability)
 %   setenv('MW_NVCC_PATH',[cudaroot '/nvcc'])
 %   eval(sprintf('mex -v -largeArrayDims %s.cu',func_name));
 % elseif isunix && ~ismac && verLessThan('matlab', '8.0.1')
-  eval(['!rm ' func_name '.o']);
+  eval(['!rm bin/' func_name '.o']);
   debug = '-g';
-  if optimize
+  if debug
     debug = '';
   end
   
-  if optimize
-    eval(sprintf('!%s/bin/nvcc -O3 -DNDEBUG -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -fPIC -v -I./common -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu',cudaroot, matlabroot, matlabroot, func_name));
+  if debug
+    eval(sprintf('!%s/bin/nvcc -O3 -DNDEBUG -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -fPIC -v -I./common -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s',cudaroot, matlabroot, matlabroot, func_name));
   else
-    eval(sprintf('!%s/bin/nvcc -g -G -O0 -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s.cu', cudaroot, matlabroot, matlabroot, func_name));
+    eval(sprintf('!%s/bin/nvcc -g -G -O0 -arch=sm_30 -ftz=true -prec-div=false -prec-sqrt=false -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -fPIC -v -I%s/extern/include -I%s/toolbox/distcomp/gpu/extern/include -c %s -out-file %s', cudaroot, matlabroot, matlabroot, func_name, out_file));
   end
+  
   if ismac
     eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' matlabroot '/bin/maci64  -lcudart -lcufft -lmwgpu']);  
   else
     lp = getenv('LIBRARY_PATH');
     setenv('LIBRARY_PATH', [lp ':' matlabroot '/bin/glnxa64']);
-    if optimize
+    if debug
       eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' matlabroot '/bin/glnxa64 -lcudart -lcufft -lmwgpu']);    
     else
       eval(['mex ' debug ' -largeArrayDims ' func_name '.o -I' cudaroot '/include -L' cudaroot '/lib64 -lcudart -lcufft -L' matlabroot '/bin/glnxa64 -lmwgpu']);

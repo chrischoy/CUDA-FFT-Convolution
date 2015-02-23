@@ -23,7 +23,7 @@ end
 cuda_compile('cudaConvolutionFFT',MATLAB_ROOT, CUDA_ROOT, 0); 
 
 n = 64;
-m = 8;
+m = 105;
 k = 5;
 
 cn = 10;
@@ -75,17 +75,19 @@ cvmatlab = sum(matConv,3);
 
 ematlab = matFFTedKernel .* (matFFTedData);
 matFFTConv = ifft2(ematlab(:,:,1));
-matFFTConv(:,:,2) = ifft2(ematlab(:,:,2));
+for i=1:k
+    matFFTConv(:,:,i) = ifft2(ematlab(:,:,i));
+end
 
 
 % dgc = [dg; conj([dg(end-1:-1:2, 1,:) dg(end-1:-1:2, end:-1:2,:)])];
 % figure(1); subplot(121); imagesc(real(dmatlab(:,:,1))); subplot(122); imagesc(real(dgc(:,:,1)));
 
-figure(3); subplot(131); imagesc(matConv(:,:,1)); subplot(132); imagesc(real(matFFTConv(:,:,1)));
-figure(4); subplot(121); subplot(122); imagesc(real(ematlab(:,:,1)))
-figure(5); subplot(121); imagesc(real(ematlab(:,:,1)));
-figure(6); subplot(131); imagesc(cvg); colorbar; subplot(132); imagesc(cvg(1:n + cn - 1,1:m + cm - 1)); colorbar; subplot(133); imagesc(cvmatlab); colorbar;
-figure(7); imagesc(cvg(1:n + cn - 1,1:m + cm - 1) - cvmatlab); colorbar;
+figure(1); subplot(131); imagesc(sum(matConv,3)); subplot(132); imagesc(real(sum(matFFTConv,3)));  subplot(133); imagesc(real(cvg));
+figure(2); subplot(121); subplot(122); imagesc(real(ematlab(:,:,1)))
+figure(3); subplot(121); imagesc(real(ematlab(:,:,1)));
+figure(4); subplot(131); imagesc(cvg); colorbar; subplot(132); imagesc(cvg(1:n + cn - 1,1:m + cm - 1)); colorbar; subplot(133); imagesc(cvmatlab); colorbar;
+figure(5); imagesc(cvg(1:n + cn - 1,1:m + cm - 1) - cvmatlab); colorbar;
 
 % k = rand(5);
 % k(:,:,2) = rand(5);
