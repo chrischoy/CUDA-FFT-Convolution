@@ -10,26 +10,26 @@ Standard convolution can take O(nm) time compare to O((n+m) log (n+m)) where n i
 Takes data, max kernel height, width, convolution kernels (multiple cells (can have different sizes)) and returns convolution results corresponding to the convolution kernels.
 
 
-## Usage
+## Usage and Instructions
 
 1. Download the repo
 
-```
-git clone git@github.com:chrischoy/MatlabCUDAConv
-```
+    ```
+    git clone git@github.com:chrischoy/MatlabCUDAConv
+    ```
 
 2. Go to the repo. Open MATLAB and type
 
-```
-compile
-```
+    ```
+    compile
+    ```
 
-3. Run demo
+3. Run demo, the demo file `demoCudaConvolutionFFT.m` contains detailed instruction of how to use the library
 
 
-```
-demoCudaConvolutionFFT
-```
+    ```
+    demoCudaConvolutionFFT
+    ```
 
 ## Output
 
