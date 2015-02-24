@@ -31,4 +31,6 @@ compile
 demoCudaConvolutionFFT
 ```
 
-WARNING : Refactoring in progress
+## Output
+
+![](https://dl.dropboxusercontent.com/u/57360783/cudafft_matlabfft_conv.png)
