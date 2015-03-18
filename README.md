@@ -15,7 +15,7 @@ Takes data, max kernel height, width, convolution kernels (multiple cells (can h
 1. Download the repo
 
     ```
-    git clone git@github.com:chrischoy/MatlabCUDAConv
+    git clone http://github.com/chrischoy/MatlabCUDAConv
     ```
 
 2. Go to the repo. Open MATLAB and type
